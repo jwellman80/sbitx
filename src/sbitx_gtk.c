@@ -957,6 +957,14 @@ struct field main_controls[] = {
 	{"#tune_duration", NULL, 1000, -1000, 50, 40, "TNDUR", 30, "5", FIELD_NUMBER, FONT_FIELD_VALUE,
 	 "", 2, 30, 1, 0},
 
+	// CESSB Controls
+	{"#cessb", NULL, 1000, -1000, 50, 40, "CESSB", 40, "OFF", FIELD_TOGGLE, FONT_FIELD_VALUE,
+	 "ON/OFF", 0, 0, 0, 0},
+	{"#cessb_threshold", NULL, 1000, -1000, 50, 40, "C_THR", 40, "60", FIELD_NUMBER, FONT_FIELD_VALUE,
+	 "", 0, 100, 5, 0},
+	{"#cessb_ratio", NULL, 1000, -1000, 50, 40, "C_RAT", 40, "3", FIELD_NUMBER, FONT_FIELD_VALUE,
+	 "", 1, 10, 1, 0},
+
 	// Settings Panel
 	{"#mycallsign", NULL, 1000, -1000, 400, 149, "MYCALLSIGN", 70, "CALL", FIELD_TEXT, FONT_SMALL,
 	 "", 3, 10, 1, 0},
@@ -3716,6 +3724,9 @@ void menu_display(int show) {
 				field_move("BFO", 350, screen_height - 40, 45, 37);
 				field_move("VFOLK", 400, screen_height - 40, 45, 37);
 				field_move("TNPWR", 500, screen_height - 40, 45, 37);
+				field_move("CESSB", 550, screen_height - 40, 50, 37);
+				field_move("C_THR", 605, screen_height - 40, 50, 37);
+				field_move("C_RAT", 660, screen_height - 40, 50, 37);
 			}
 
 			else {

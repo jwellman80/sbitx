@@ -1,0 +1,262 @@
+SBITX SSB MODULATION - QUICK REFERENCE GUIDE
+=============================================
+
+AUDIO PROCESSING ENTRY POINT
+----------------------------
+File: /home/pi/sbitx/src/sbitx.c
+Function: sound_process() [Line 1947]
+  - Called continuously from sound thread
+  - Routes to tx_process() or rx_linear() based on in_tx flag
+
+TX PROCESSING PIPELINE (MAIN FLOW)
+----------------------------------
+File: /home/pi/sbitx/src/sbitx.c
+Function: tx_process() [Lines 1589-1945]
+
+  Step 1: Microphone Input
+    - Input: input_mic (int32_t, 96 kHz)
+    - Normalize: divide by 2e9 to get [-1.0, 1.0]
+
+  Step 2: Compression (Optional)
+    - Function: apply_fixed_compression() [Line 361]
+    - Threshold: 0.1
+    - Ratio: 4:1
+    - Enabled: compression_control_level >= 1
+
+  Step 3: Equalization (Optional)
+    - Function: apply_eq(&tx_eq, ...) [Line 1668]
+    - 10 bands, configurable
+
+  Step 4: Time-Domain Buffering
+    - FFT input buffer with overlap-add
+    - Previous MAX_BINS/2 samples + new samples
+
+  Step 5: FFT to Frequency Domain
+    - Function: fftw_execute(plan_fwd) [Line 1770]
+    - Result: fft_out contains frequency bins
+    - FFT Size: MAX_BINS = 2048
+    - Resolution: 96000/2048 = 46.875 Hz/bin
+
+  Step 6: Frequency-Domain Filtering
+    - Apply FIR coefficients [Line 1776-1778]
+    - fft_out[i] *= tx_filter->fir_coeff[i]
+    - Kaiser-windowed FIR filter
+
+  Step 7: Sideband Selection
+    - USB: Zero bins 0 to MAX_BINS/2-1
+    - LSB: Zero bins MAX_BINS/2 to MAX_BINS-1
+    - AM: Keep both sidebands
+
+  Step 8: SSB Power Adjustment
+    - Multiply by ssb_val parameter [Line 1801-1805]
+    - From hw_settings.ini
+
+  Step 9: Frequency Shifting
+    - Rotate bins by tx_shift (~512 bins = ~24 kHz)
+    - Moves signal to output frequency band
+
+  Step 10: IFFT to Time Domain
+    - Function: fftw_execute(r->plan_rev) [Line 1826]
+    - Result: r->fft_time contains I/Q samples
+    - Take real part: creal(r->fft_time[i])
+
+  Step 11: Output Scaling & ALC
+    - scale = volume * tx_amp * alc_level
+    - output_tx[i] = sample * scale [Line 1833]
+
+RX PROCESSING PIPELINE
+----------------------
+File: /home/pi/sbitx/src/sbitx.c
+Function: rx_linear() [Lines 1142-1525]
+
+  Similar to TX but:
+  - Input: input_rx (received signal)
+  - Bin rotation brings desired signal to baseband
+  - Optional DSP: Notch filter, Spectral subtraction, ANR
+  - AGC applied after IFFT
+  - Output to speaker, no power limiting
+
+KEY DATA STRUCTURES
+-------------------
+
+struct filter {
+    complex float *fir_coeff;  // FIR coefficients in freq domain
+    int N;                     // Total length (1024+1025-1=2048)
+    int L;                     // Input length (1024)
+    int M;                     // Impulse length (1025)
+};
+
+struct rx {
+    long tuned_bin;            // Frequency bin offset
+    short mode;                // MODE_USB, MODE_LSB, MODE_CW, MODE_AM
+    fftw_complex *fft_freq;    // Frequency domain
+    fftw_complex *fft_time;    // Time domain
+    struct filter *filter;     // Filtering object
+    int agc_speed;             // Hang time
+    double agc_gain;           // Current gain
+    struct rx *next;           // Linked list
+};
+
+FILTERING
+---------
+File: /home/pi/sbitx/src/fft_filter.c
+
+Function: filter_new(int input_length, int impulse_length)
+  - Creates filter structure
+  - Allocates FFT-aligned memory for coefficients
+
+Function: filter_tune(f, low, high, kaiser_beta)
+  - low, high: normalized frequencies (0.0 to 1.0)
+  - kaiser_beta: window parameter (typical: 5.0)
+  - Performs:
+    1. Create ideal frequency response
+    2. IFFT to time domain
+    3. Apply Kaiser window
+    4. FFT back to frequency domain
+
+Example usage (LSB, -3000 to -300 Hz):
+  filter_tune(r->filter, -3000.0/96000, -300.0/96000, 5.0);
+
+AGC CONTROL
+-----------
+File: /home/pi/sbitx/src/sbitx.c [Line 836]
+
+Function: double agc2(struct rx *r)
+  - Finds peak signal in time domain
+  - Calculates desired gain
+  - Fast attack: immediate if signal increases
+  - Slow decay: hangs for agc_speed blocks, then decays
+  - Returns effective S-meter reading
+
+COMPRESSION
+-----------
+File: /home/pi/sbitx/src/sbitx.c [Line 361]
+
+Function: apply_fixed_compression(float *input, int num_samples, int level)
+  - Fixed threshold: 0.1
+  - Fixed ratio: 4:1
+  - Level parameter (1-10) controls makeup gain
+  - Enabled in TX for voice modes only
+
+PARAMETRIC EQ
+-------------
+File: /home/pi/sbitx/src/para_eq.c
+
+Function: apply_eq(parametriceq *eq, int32_t *samples, int num_samples, double sample_rate)
+  - 10-band EQ for TX and RX (independent)
+  - Biquad filters
+  - Configuration: user_settings.ini
+
+USEFUL CONSTANTS
+----------------
+MAX_BINS = 2048                    // FFT size
+Sample Rate = 96000 Hz             // All processing
+Block Size = MAX_BINS/2 = 1024     // Samples per call
+Frequency Resolution = 46.875 Hz   // 96000/2048
+Block Duration = 10.67 ms          // 1024/96000
+TX Shift = 512 bins (~24 kHz)
+Input Normalization = 2e9 (int32_t to float)
+
+MODE DEFINITIONS (sdr.h)
+------------------------
+MODE_USB = 0       // Upper sideband
+MODE_LSB = 1       // Lower sideband
+MODE_CW = 2        // CW (uses USB)
+MODE_CWR = 3       // CW reverse (uses LSB)
+MODE_NBFM = 4
+MODE_AM = 5        // Amplitude modulation
+MODE_FT8 = 6
+MODE_PSK31 = 7
+MODE_RTTY = 8
+MODE_DIGITAL = 9
+MODE_2TONE = 10
+MODE_CALIBRATE = 11
+
+AUDIO PATHS
+-----------
+TX Audio Chain:
+  Mic → Compression → EQ → FFT → Filter → Sideband Select → 
+  Shift → IFFT → Scale → Output
+
+RX Audio Chain:
+  RF Input → FFT → Rotate Bins → DSP (optional) → Sideband Select → 
+  Filter → IFFT → AGC → EQ → Output
+
+CESSB IMPLEMENTATION POINTS
+----------------------------
+
+1. POST-IFFT (Simplest):
+   Location: After line 1839 in sbitx.c
+   Action: Detect envelope magnitude, apply peak limiting
+   Pros: Simple, direct control
+   Cons: May affect modulation quality
+
+2. PRE-IFFT (Better):
+   Location: Before line 1826 in sbitx.c
+   Action: Control magnitude in frequency domain while preserving phase
+   Pros: Better modulation quality
+   Cons: More complex
+
+3. FREQUENCY-DOMAIN (Best):
+   Location: After line 1820 in sbitx.c
+   Action: Apply Hilbert transform for analytic signal
+   Pros: Optimal phase coherence
+   Cons: Computationally intensive
+
+KEY PARAMETERS FOR TUNING
+--------------------------
+volume:                    // Output level scaling
+tx_amp:                    // Band-specific drive adjustment
+tx_drive:                  // TX power control (0-100)
+ssb_val:                   // SSB modulation power factor
+alc_level:                 // Automatic Level Control
+compression_control_level: // 0=off, 1-10=active
+voice_clip_level:          // Soft clip threshold (0.04)
+tx_shift:                  // Frequency shift (bins)
+tx_gain:                   // Microphone input gain
+rx_gain:                   // RX gain (dB)
+
+GLOBAL FFT ARRAYS
+-----------------
+fft_in[MAX_BINS]:      // FFT input (time domain)
+fft_out[MAX_BINS]:     // FFT output (frequency domain)
+fft_m[MAX_BINS/2]:     // Previous samples for overlap-add
+
+CRITICAL TIMING
+---------------
+Sample Rate:       96000 Hz
+Block Size:        1024 samples
+Block Duration:    10.67 ms
+FFT Length:        2048 samples (includes 1024 overlap)
+Effective Latency: ~20-30 ms (2-3 blocks)
+
+FILES REQUIRING MODIFICATION FOR CESSB
+--------------------------------------
+/home/pi/sbitx/src/sbitx.c:
+  - tx_process() function (around line 1826-1845)
+  - Add envelope detection functions
+  - Add envelope limiting logic
+
+/home/pi/sbitx/src/sdr.h:
+  - Add CESSB configuration structures
+  - Add function declarations
+
+New file (optional):
+  - cessb.c - CESSB-specific functions
+  - cessb.h - CESSB function prototypes
+
+TESTING CESSB IMPLEMENTATION
+-----------------------------
+1. Monitor peak-to-average power ratio (PAPR)
+2. Measure spectral regrowth (spectrum analyzer needed)
+3. Verify modulation quality (EVM measurement)
+4. Check phase continuity between samples
+5. Test envelope attack/release behavior
+6. Validate sideband rejection
+7. Measure adjacent channel power
+
+COMPILATION NOTES
+-----------------
+Requires: FFTW3, ALSA, pthread
+CFLAGS should include: -I/usr/include/fftw3 -lfftw3 -lm -lpthread
+

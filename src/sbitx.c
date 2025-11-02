@@ -23,6 +23,7 @@
 #include "si5351.h"
 #include "ini.h"
 #include "para_eq.h"
+#include "cessb.h"
 
 #define DEBUG 0
 
@@ -32,6 +33,7 @@ char audio_card[32];
 static int tx_shift = 512;
 parametriceq tx_eq;
 parametriceq rx_eq;
+cessb_t cessb;
 
 FILE *pf_debug = NULL;
 
@@ -1612,11 +1614,18 @@ void tx_process(
 		tx_process_restart = 0;
 	}
 	static int eq_initialized = 0;
+	static int cessb_initialized = 0;
 
 	if (!eq_initialized)
 	{
 		init_eq(&tx_eq, "tx");
 		eq_initialized = 1;
+	}
+
+	if (!cessb_initialized)
+	{
+		cessb_init(&cessb);
+		cessb_initialized = 1;
 	}
 
 	if (in_tx && (r->mode != MODE_DIGITAL && r->mode != MODE_FT8 && r->mode != MODE_2TONE && r->mode != MODE_CW && r->mode != MODE_CWR))
@@ -1824,6 +1833,29 @@ void tx_process(
 
 	// convert back to time domain
 	fftw_execute(r->plan_rev);
+
+	// Apply CESSB processing if enabled
+	if (cessb.enabled && (r->mode == MODE_USB || r->mode == MODE_LSB))
+	{
+		complex float cessb_in[MAX_BINS / 2];
+		complex float cessb_out[MAX_BINS / 2];
+
+		// Copy complex samples for CESSB processing
+		for (i = 0; i < MAX_BINS / 2; i++)
+		{
+			cessb_in[i] = (complex float)r->fft_time[i + (MAX_BINS / 2)];
+		}
+
+		// Process with CESSB
+		cessb_process(&cessb, cessb_in, cessb_out, MAX_BINS / 2);
+
+		// Copy processed samples back
+		for (i = 0; i < MAX_BINS / 2; i++)
+		{
+			r->fft_time[i + (MAX_BINS / 2)] = cessb_out[i];
+		}
+	}
+
 	int min = 10000000;
 	int max = -10000000;
 	float scale = volume;
@@ -2580,6 +2612,32 @@ void sdr_request(char *request, char *response)
 	{
 		bandtweak = atoi(value);
 		printf("Now adjusting band %i scale is currently: %f\n", band_power[bandtweak].f_start, band_power[bandtweak].scale);
+	}
+	else if (!strcmp(cmd, "#cessb"))
+	{
+		if (!strcmp(value, "ON"))
+		{
+			cessb_set_enabled(&cessb, 1);
+			printf("*CESSB enabled\n");
+		}
+		else
+		{
+			cessb_set_enabled(&cessb, 0);
+			printf("*CESSB disabled\n");
+		}
+	}
+	else if (!strcmp(cmd, "#cessb_threshold"))
+	{
+		// Value is 0-100, convert to 0.5-1.0 range
+		float threshold = 0.5 + (atoi(value) / 100.0) * 0.5;
+		cessb_set_threshold(&cessb, threshold);
+		printf("*CESSB threshold set to %.2f\n", threshold);
+	}
+	else if (!strcmp(cmd, "#cessb_ratio"))
+	{
+		float ratio = atof(value);
+		cessb_set_clip_ratio(&cessb, ratio);
+		printf("*CESSB ratio set to %.1f\n", ratio);
 	}
 
 	/* else
