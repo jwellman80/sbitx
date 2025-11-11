@@ -1601,9 +1601,16 @@ void tx_process(
 	int32_t *output_speaker, int32_t *output_tx,
 	int n_samples)
 {
+	// Detailed timing for TX processing to find bottleneck
+	static struct timespec tx_t0, tx_t1, tx_t2, tx_t3, tx_t4;
+	static long max_section_us[4] = {0, 0, 0, 0};
+	static int tx_timing_counter = 0;
+
+	clock_gettime(CLOCK_MONOTONIC, &tx_t0);
+
 	int i;
 	double i_sample, q_sample, i_carrier;
-	
+
 	// Check if browser microphone is active and use it instead of physical mic
 	int32_t browser_mic_samples[n_samples];
 	int use_browser_mic = is_browser_mic_active();
@@ -1855,11 +1862,25 @@ void tx_process(
 
 	read_power();
 
-	// Instead of using sdr_modulation_update, we'll update the spectrum data directly
-	// This allows the TX audio to be displayed in the spectrum and waterfall
-	
-	// Create input buffer for FFT
-	complex float *tx_fft_in = (complex float *)malloc(sizeof(complex float) * MAX_BINS);
+	// CRITICAL OPTIMIZATION: Skip expensive TX spectrum processing during CW
+	// CW doesn't need real-time spectrum display and it was causing massive delays
+	struct rx *r_check = tx_list;
+	int skip_tx_spectrum = (r_check->mode == MODE_CW || r_check->mode == MODE_CWR);
+
+	if (!skip_tx_spectrum) {
+		// Instead of using sdr_modulation_update, we'll update the spectrum data directly
+		// This allows the TX audio to be displayed in the spectrum and waterfall
+
+		// CRITICAL FIX: Use static buffers instead of malloc() - malloc blocks for 100+ ms!
+		static complex float tx_fft_in[MAX_BINS];
+		static complex float smoothed[MAX_BINS];
+		static int first_tx_spectrum = 1;
+
+		if (first_tx_spectrum) {
+			fprintf(stderr, "[DIAGNOSTIC] TX spectrum using static buffers (no malloc!)\n");
+			fflush(stderr);
+			first_tx_spectrum = 0;
+		}
 	
 	// Calculate DC offset (average) to remove it
 	float dc_offset = 0;
@@ -1910,8 +1931,8 @@ void tx_process(
 	}
 	
 	// Apply a more refined smoothing that preserves detail while reducing noise
-	complex float *smoothed = (complex float *)malloc(sizeof(complex float) * MAX_BINS);
-	
+	// (smoothed buffer already declared as static above - no malloc!)
+
 	// Copy first and last points as-is
 	smoothed[0] = fft_spectrum[0];
 	smoothed[MAX_BINS-1] = fft_spectrum[MAX_BINS-1];
@@ -1939,18 +1960,15 @@ void tx_process(
 	for (i = 0; i < MAX_BINS; i++) {
 		fft_spectrum[i] = smoothed[i];
 	}
-	
-	// Free the temporary buffer
-	free(smoothed);
-	
-	// Call the standard spectrum update function to ensure consistent processing
-	spectrum_update();
-	
-	// Clean up
-	free(tx_fft_in);
+
+		// No need to free - using static buffers now!
+
+		// Call the standard spectrum update function to ensure consistent processing
+		spectrum_update();
+	} // End of TX spectrum processing (skipped during CW)
 
 	// The old sdr_modulation_update function is still called for API compatibility
-	sdr_modulation_update(output_tx, MAX_BINS / 2, tx_amp);
+	// sdr_modulation_update(output_tx, MAX_BINS / 2, tx_amp);  // Commented out - redundant
 }
 
 /*
