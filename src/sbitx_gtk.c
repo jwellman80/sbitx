@@ -5896,7 +5896,14 @@ void tx_on(int trigger)
 		in_tx = trigger; // can be PTT or softswitch
 		char response[20];
 		struct field *freq = get_field("r1:freq");
-		set_operating_freq(atoi(freq->value), response);
+		int current_freq = atoi(freq->value);
+
+		// Cache last TX frequency to avoid unnecessary I2C operations during CW break-in
+		static int last_tx_freq = 0;
+		if (current_freq != last_tx_freq) {
+			set_operating_freq(current_freq, response);
+			last_tx_freq = current_freq;
+		}
 		update_field(get_field("r1:freq"));
 		// printf("TX\n");
 		//	printf("ext_ptt_enable value: %d\n", ext_ptt_enable); //Added to debug the switch. W2JON
