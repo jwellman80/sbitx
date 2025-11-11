@@ -39,6 +39,13 @@ static unsigned long i2c_lock_attempts = 0;
 static struct timespec i2c_lock_start, i2c_lock_end;
 
 static inline void i2c_lock_acquire(void) {
+	static int first_lock = 1;
+	if (first_lock) {
+		fprintf(stderr, "[DIAGNOSTIC] I2C mutex contention tracking enabled\n");
+		fflush(stderr);
+		first_lock = 0;
+	}
+
 	i2c_lock_attempts++;
 	clock_gettime(CLOCK_MONOTONIC, &i2c_lock_start);
 
@@ -52,13 +59,14 @@ static inline void i2c_lock_acquire(void) {
 		long wait_us = (i2c_lock_end.tv_sec - i2c_lock_start.tv_sec) * 1000000L +
 		               (i2c_lock_end.tv_nsec - i2c_lock_start.tv_nsec) / 1000L;
 
-		// Warn if blocking for more than 1ms (bad for audio thread)
-		if (wait_us > 1000) {
+		// Warn if blocking for more than 500us (bad for audio thread)
+		if (wait_us > 500) {
 			static int warn_count = 0;
-			if (++warn_count % 10 == 0) {
-				printf("I2C mutex contention: waited %ld us (count=%lu/%lu = %.1f%%)\n",
+			if (++warn_count % 5 == 0) {  // Report every 5th occurrence
+				fprintf(stderr, "[I2C CONTENTION] Waited %ld us (total count=%lu/%lu = %.1f%%)\n",
 				       wait_us, i2c_lock_wait_count, i2c_lock_attempts,
 				       100.0 * i2c_lock_wait_count / i2c_lock_attempts);
+				fflush(stderr);
 			}
 		}
 	}

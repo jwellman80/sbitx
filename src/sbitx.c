@@ -1967,6 +1967,13 @@ void sound_process(
 	static struct timespec timing_start, timing_end;
 	static long max_process_time_us = 0;
 	static int timing_counter = 0;
+	static int first_run = 1;
+
+	if (first_run) {
+		fprintf(stderr, "[DIAGNOSTIC] Audio callback timing enabled - will report every 100 callbacks\n");
+		fflush(stderr);
+		first_run = 0;
+	}
 
 	clock_gettime(CLOCK_MONOTONIC, &timing_start);
 
@@ -1997,9 +2004,11 @@ void sound_process(
 	if (++timing_counter >= 100) {
 		timing_counter = 0;
 		// Expected time: 1024 samples @ 96kHz = 10666 us
-		printf("Audio callback: max=%ld us (expected ~10666 us), %s\n",
+		fprintf(stderr, "[TIMING] Audio callback: max=%ld us (expected ~10666 us), mode=%s, %s\n",
 		       max_process_time_us,
+		       in_tx ? "TX" : "RX",
 		       max_process_time_us > 10000 ? "WARNING: OVERRUN!" : "OK");
+		fflush(stderr);
 		max_process_time_us = 0;
 	}
 }
@@ -2135,7 +2144,18 @@ static void read_hw_ini()
 */
 void set_tx_power_levels()
 {
-	 printf("Setting tx_power drive to %d\n", tx_drive);
+	// Cache mixer values to avoid blocking sound_mixer() calls on every TX transition
+	static int last_master_vol = -1;
+	static int last_tx_gain = -1;
+	static int first_call = 1;
+
+	if (first_call) {
+		fprintf(stderr, "[DIAGNOSTIC] set_tx_power_levels() - caching enabled to reduce blocking\n");
+		fflush(stderr);
+		first_call = 0;
+	}
+
+	// printf("Setting tx_power drive to %d\n", tx_drive);
 	// int tx_power_gain = 0;
 
 	// search for power in the approved bands
@@ -2149,9 +2169,23 @@ void set_tx_power_levels()
 		}
 	}
 	//	printf("tx_amp is set to %g for %d drive\n", tx_amp, tx_drive);
-	// we keep the audio card output 'volume' constant'
-	sound_mixer(audio_card, "Master", 95);
-	sound_mixer(audio_card, "Capture", tx_gain);
+
+	// CRITICAL FIX: Only call blocking sound_mixer() when values actually change
+	// This prevents 20-40ms blocking delays on every CW key press
+	if (last_master_vol != 95) {
+		sound_mixer(audio_card, "Master", 95);
+		last_master_vol = 95;
+		fprintf(stderr, "[TX POWER] Set Master volume (blocking call)\n");
+		fflush(stderr);
+	}
+
+	if (last_tx_gain != tx_gain) {
+		sound_mixer(audio_card, "Capture", tx_gain);
+		last_tx_gain = tx_gain;
+		fprintf(stderr, "[TX POWER] Set Capture gain to %d (blocking call)\n", tx_gain);
+		fflush(stderr);
+	}
+
 	alc_level = 1.0;
 }
 
@@ -2278,7 +2312,7 @@ void tr_switch_v4(int tx_on) {
   if (tx_on) {                   // switch to transmit
 		digitalWrite(RX_LINE, LOW);
 
-		//first turn off the LPFs, so PA doesnt connect 
+		//first turn off the LPFs, so PA doesnt connect
  		digitalWrite(LPF_A, LOW);
  		digitalWrite(LPF_B, LOW);
  		digitalWrite(LPF_C, LOW);
@@ -2286,13 +2320,16 @@ void tr_switch_v4(int tx_on) {
  		digitalWrite(LPF_E, LOW);
 
     in_tx = 1;                   // raise a flag so functions see we are in transmit mode
-    sound_mixer(audio_card, "Master", 0);  // mute audio while switching to transmit
-    sound_mixer(audio_card, "Capture", 0);
+    // Removed blocking sound_mixer calls to reduce TX latency - mute_count handles audio muting
+    //sound_mixer(audio_card, "Master", 0);  // mute audio while switching to transmit
+    //sound_mixer(audio_card, "Capture", 0);
 		if (rx_list->mode != MODE_CW && rx_list->mode != MODE_CWR) {
 		delay(20);
+		mute_count = 20;             // number of audio samples to zero out for SSB/AM
 	}
-    //mute_count = 20;             // number of audio samples to zero out
-    mute_count = 1;             // number of audio samples to zero out
+	else {
+		mute_count = 1;             // minimal muting for CW for fast break-in
+	}
 	fft_reset_m_bins();          // fixes burst at start of transmission
     set_tx_power_levels();       // use values for tx_power_watts, tx_gain
     //ADDED BY KF7YDU - Check if ptt is enabled, if so, set ptt pin to high
@@ -2311,8 +2348,9 @@ void tr_switch_v4(int tx_on) {
   } else {                       // switch to receive
     in_tx = 0;                   // lower the transmit flag
 		digitalWrite(TX_LINE, LOW);
-    sound_mixer(audio_card, "Master", 0);  // mute audio while switching to receive
-    sound_mixer(audio_card, "Capture", 0);
+    // Removed blocking sound_mixer calls from TX->RX transition - mute_count handles the transition
+    //sound_mixer(audio_card, "Master", 0);  // mute audio while switching to receive
+    //sound_mixer(audio_card, "Capture", 0);
     fft_reset_m_bins();
     mute_count = MUTE_MAX;
 		digitalWrite(LPF_A, LOW);
@@ -2412,6 +2450,15 @@ This is the one-time initialization code
 */
 void setup()
 {
+	fprintf(stderr, "\n");
+	fprintf(stderr, "========================================\n");
+	fprintf(stderr, "  DIAGNOSTIC VERSION - CW LATENCY DEBUG\n");
+	fprintf(stderr, "========================================\n");
+	fprintf(stderr, "Audio callback timing: ENABLED\n");
+	fprintf(stderr, "I2C mutex tracking:    ENABLED\n");
+	fprintf(stderr, "Watch for [TIMING] and [I2C CONTENTION] messages\n");
+	fprintf(stderr, "========================================\n\n");
+	fflush(stderr);
 
 	read_hw_ini();
 
