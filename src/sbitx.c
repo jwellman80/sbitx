@@ -1602,9 +1602,10 @@ void tx_process(
 	int n_samples)
 {
 	// Detailed timing for TX processing to find bottleneck
-	static struct timespec tx_t0, tx_t1, tx_t2, tx_t3, tx_t4;
-	static long max_section_us[4] = {0, 0, 0, 0};
+	static struct timespec tx_t0, tx_t0b, tx_t1, tx_t2, tx_t3, tx_t4;
+	static long max_section_us[5] = {0, 0, 0, 0, 0};
 	static int tx_timing_counter = 0;
+	static int first_cw_tx_opt = 1;
 
 	clock_gettime(CLOCK_MONOTONIC, &tx_t0);
 
@@ -1778,12 +1779,25 @@ void tx_process(
 		m++;
 	}
 
-	// push the samples to the remote audio queue, decimated to 16000 samples/sec
-	for (i = 0; i < MAX_BINS / 2; i += 6) {
-		q_write(&qremote, output_speaker[i]);
+	// TIMING CHECKPOINT 0b: After sample gathering loop, before queue
+	clock_gettime(CLOCK_MONOTONIC, &tx_t0b);
+
+	// CRITICAL OPTIMIZATION: Skip remote audio queue during CW for low latency
+	// Remote monitoring not needed during CW, saves 5-10ms
+	if (r->mode != MODE_CW && r->mode != MODE_CWR) {
+		// push the samples to the remote audio queue, decimated to 16000 samples/sec
+		for (i = 0; i < MAX_BINS / 2; i += 6) {
+			q_write(&qremote, output_speaker[i]);
+		}
+	} else {
+		if (first_cw_tx_opt) {
+			fprintf(stderr, "[CW OPTIMIZATION] Skipping remote audio queue during CW TX\n");
+			fflush(stderr);
+			first_cw_tx_opt = 0;
+		}
 	}
 
-	// TIMING CHECKPOINT 1: After sample gathering
+	// TIMING CHECKPOINT 1: After sample gathering + queue
 	clock_gettime(CLOCK_MONOTONIC, &tx_t1);
 
 	// convert to frequency
@@ -1986,27 +2000,28 @@ void tx_process(
 	tx_timing_counter++;
 
 	// Calculate section times in microseconds
-	long section1_us = (tx_t1.tv_sec - tx_t0.tv_sec) * 1000000L + (tx_t1.tv_nsec - tx_t0.tv_nsec) / 1000L;  // Sample gathering
-	long section2_us = (tx_t2.tv_sec - tx_t1.tv_sec) * 1000000L + (tx_t2.tv_nsec - tx_t1.tv_nsec) / 1000L;  // FFT forward
-	long section3_us = (tx_t3.tv_sec - tx_t2.tv_sec) * 1000000L + (tx_t3.tv_nsec - tx_t2.tv_nsec) / 1000L;  // Filtering/rotation
-	long section4_us = (tx_t4.tv_sec - tx_t3.tv_sec) * 1000000L + (tx_t4.tv_nsec - tx_t3.tv_nsec) / 1000L;  // FFT inverse + output
+	long section0_us = (tx_t0b.tv_sec - tx_t0.tv_sec) * 1000000L + (tx_t0b.tv_nsec - tx_t0.tv_nsec) / 1000L;  // Sample loop
+	long section1_us = (tx_t1.tv_sec - tx_t0b.tv_sec) * 1000000L + (tx_t1.tv_nsec - tx_t0b.tv_nsec) / 1000L; // Remote queue
+	long section2_us = (tx_t2.tv_sec - tx_t1.tv_sec) * 1000000L + (tx_t2.tv_nsec - tx_t1.tv_nsec) / 1000L;   // FFT forward
+	long section3_us = (tx_t3.tv_sec - tx_t2.tv_sec) * 1000000L + (tx_t3.tv_nsec - tx_t2.tv_nsec) / 1000L;   // Filtering/rotation
+	long section4_us = (tx_t4.tv_sec - tx_t3.tv_sec) * 1000000L + (tx_t4.tv_nsec - tx_t3.tv_nsec) / 1000L;   // FFT inverse + output
 
 	// Track maximum times for each section
-	if (section1_us > max_section_us[0]) max_section_us[0] = section1_us;
-	if (section2_us > max_section_us[1]) max_section_us[1] = section2_us;
-	if (section3_us > max_section_us[2]) max_section_us[2] = section3_us;
-	if (section4_us > max_section_us[3]) max_section_us[3] = section4_us;
+	if (section0_us > max_section_us[0]) max_section_us[0] = section0_us;
+	if (section1_us > max_section_us[1]) max_section_us[1] = section1_us;
+	if (section2_us > max_section_us[2]) max_section_us[2] = section2_us;
+	if (section3_us > max_section_us[3]) max_section_us[3] = section3_us;
+	if (section4_us > max_section_us[4]) max_section_us[4] = section4_us;
 
 	if (tx_timing_counter >= 100) {
-		long total_us = section1_us + section2_us + section3_us + section4_us;
-		fprintf(stderr, "[TX TIMING] Breakdown (max us): Samples=%ld, FFT_fwd=%ld, Filter=%ld, FFT_inv=%ld, Total=%ld\n",
-		       max_section_us[0], max_section_us[1], max_section_us[2], max_section_us[3],
-		       max_section_us[0] + max_section_us[1] + max_section_us[2] + max_section_us[3]);
+		fprintf(stderr, "[TX TIMING] Breakdown (max us): SampleLoop=%ld, Queue=%ld, FFT_fwd=%ld, Filter=%ld, FFT_inv=%ld, Total=%ld\n",
+		       max_section_us[0], max_section_us[1], max_section_us[2], max_section_us[3], max_section_us[4],
+		       max_section_us[0] + max_section_us[1] + max_section_us[2] + max_section_us[3] + max_section_us[4]);
 		fflush(stderr);
 
 		// Reset counters
 		tx_timing_counter = 0;
-		max_section_us[0] = max_section_us[1] = max_section_us[2] = max_section_us[3] = 0;
+		max_section_us[0] = max_section_us[1] = max_section_us[2] = max_section_us[3] = max_section_us[4] = 0;
 	}
 }
 

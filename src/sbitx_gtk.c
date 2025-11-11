@@ -282,6 +282,7 @@ void zbitx_poll(int all);
 void zbitx_pipe(int style, char *text);
 void zbitx_get_spectrum(char *buff);
 void zbitx_write(int style, char *text);
+void key_init_interrupts();
 
 int noise_threshold = 0;		// DSP
 int noise_update_interval = 50; // DSP
