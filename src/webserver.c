@@ -601,20 +601,39 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     }
     // Check for HTTP->HTTPS redirect *before* other handling
     if (redirect_http_to_https && !c->is_tls) {
-      // Construct the target URL: https://sbitx.local:8443 + original URI
+      // Get the Host header from the request to preserve the hostname/IP used by the client
+      struct mg_str *host_header = mg_http_get_header(hm, "Host");
       char https_url[2048];
-      snprintf(https_url, sizeof(https_url), "https://sbitx.local:8443%.*s", 
-               (int)hm->uri.len, hm->uri.buf);
-      
+
+      if (host_header != NULL && host_header->len > 0) {
+        // Use the Host header value, but replace the port with 8443
+        char host_buf[256];
+        int host_len = (int)host_header->len < 255 ? (int)host_header->len : 255;
+        strncpy(host_buf, host_header->buf, host_len);
+        host_buf[host_len] = '\0';
+
+        // Strip any existing port from the host header
+        char *colon = strchr(host_buf, ':');
+        if (colon) *colon = '\0';
+
+        // Construct the target URL: https://<actual-hostname>:8443 + original URI
+        snprintf(https_url, sizeof(https_url), "https://%s:8443%.*s",
+                 host_buf, (int)hm->uri.len, hm->uri.buf);
+      } else {
+        // Fallback if no Host header (shouldn't happen with modern browsers)
+        snprintf(https_url, sizeof(https_url), "https://localhost:8443%.*s",
+                 (int)hm->uri.len, hm->uri.buf);
+      }
+
       // Construct the Location header string, including Content-Length: 0
-      char redir_headers[2100]; 
+      char redir_headers[2100];
       snprintf(redir_headers, sizeof(redir_headers), "Location: %s\r\nContent-Length: 0\r\n", https_url);
 
       // Send 302 redirect using the extra_headers parameter (3rd arg), empty body format (4th arg)
-      mg_http_reply(c, 302, redir_headers, ""); 
-            
+      mg_http_reply(c, 302, redir_headers, "");
+
       // Stop processing this request after sending the redirect
-      return; 
+      return;
     }
 
     // Log basic HTTP message receipt only if debugging (if not redirected)
