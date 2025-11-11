@@ -7338,11 +7338,31 @@ static void zbitx_logs(){
 void zbitx_poll(int all){
 	char buff[3000];
 	static unsigned int last_update = 0;
+	static unsigned int last_cw_tx_update = 0;
+	static int first_call = 1;
+
+	if (first_call) {
+		fprintf(stderr, "[DIAGNOSTIC] zbitx_poll() - CW TX throttling enabled\n");
+		fflush(stderr);
+		first_call = 0;
+	}
 
 	int count = 0;
 	int e = 0;
 	int retry;
 	unsigned int this_time = millis();
+
+	// CRITICAL FIX: Throttle front panel updates during CW TX to reduce I2C contention
+	// Front panel doesn't need rapid updates during CW - audio thread needs I2C priority
+	if (in_tx && (mode_id(field_str("MODE")) == MODE_CW || mode_id(field_str("MODE")) == MODE_CWR)) {
+		// Only update front panel every 500ms during CW TX (not every 20-100ms)
+		if (this_time - last_cw_tx_update < 500 && !all) {
+			return;  // Skip this poll - too soon
+		}
+		last_cw_tx_update = this_time;
+		fprintf(stderr, "[ZBITX] Front panel update during CW TX (throttled to 500ms)\n");
+		fflush(stderr);
+	}
 
 	for (int i = 0; active_layout[i].cmd[0] > 0; i++){
 		struct field *f = active_layout+i;
@@ -7367,7 +7387,7 @@ void zbitx_poll(int all){
 		}
 	}
 	last_update = this_time;
-	
+
 	//check if the console q has any new updates
 	while (q_length(&q_zbitx_console) > 0){
 		char remote_cmd[1000];
@@ -7378,22 +7398,26 @@ void zbitx_poll(int all){
 			remote_cmd[i++] = c;
 		remote_cmd[i++] = '}';
 		remote_cmd[i++] = 0;
- 	
-		e = i2cbb_write_i2c_block_data(ZBITX_I2C_ADDRESS, '{', 
+
+		e = i2cbb_write_i2c_block_data(ZBITX_I2C_ADDRESS, '{',
 			strlen(remote_cmd), remote_cmd);
 	}
 
+	// Skip spectrum updates during CW TX to reduce I2C load
+	int is_cw_tx = (in_tx && (mode_id(field_str("MODE")) == MODE_CW || mode_id(field_str("MODE")) == MODE_CWR));
 
-	zbitx_get_spectrum(buff);
-	strcat(buff, "}"); //terminate the block
-	//spectrum can be lost mometarily, it is alright	
-	delay(1);
-	i2cbb_write_i2c_block_data(0x0a, '{', strlen(buff), buff);
+	if (!is_cw_tx) {
+		zbitx_get_spectrum(buff);
+		strcat(buff, "}"); //terminate the block
+		//spectrum can be lost mometarily, it is alright
+		delay(1);
+		i2cbb_write_i2c_block_data(0x0a, '{', strlen(buff), buff);
 
-	//transmit in_tx
-	sprintf(buff, "IN_TX %d}", in_tx);
-	delay(1);
-	i2cbb_write_i2c_block_data(0x0a, '{', strlen(buff), buff);
+		//transmit in_tx
+		sprintf(buff, "IN_TX %d}", in_tx);
+		delay(1);
+		i2cbb_write_i2c_block_data(0x0a, '{', strlen(buff), buff);
+	}
 
 
 	if(update_logs){
