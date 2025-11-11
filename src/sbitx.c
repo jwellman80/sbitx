@@ -1783,8 +1783,14 @@ void tx_process(
 		q_write(&qremote, output_speaker[i]);
 	}
 
+	// TIMING CHECKPOINT 1: After sample gathering
+	clock_gettime(CLOCK_MONOTONIC, &tx_t1);
+
 	// convert to frequency
 	fftw_execute(plan_fwd);
+
+	// TIMING CHECKPOINT 2: After FFT forward transform
+	clock_gettime(CLOCK_MONOTONIC, &tx_t2);
 
 	// NOTE: fft_out holds the fft output (in freq domain) of the
 	// incoming mic samples
@@ -1836,6 +1842,9 @@ void tx_process(
 		r->fft_freq[b] = fft_out[i];
 	}
 
+	// TIMING CHECKPOINT 3: After filtering and frequency rotation
+	clock_gettime(CLOCK_MONOTONIC, &tx_t3);
+
 	// the spectrum display is updated
 	// spectrum_update();
 
@@ -1855,7 +1864,10 @@ void tx_process(
 		// output_tx[i] = 0;
 	}
 	//	printf("min %d, max %d\n", min, max);
-	
+
+	// TIMING CHECKPOINT 4: After inverse FFT and output generation
+	clock_gettime(CLOCK_MONOTONIC, &tx_t4);
+
 	if (sbitx_version < 4)
 		read_power();
 	sdr_modulation_update(output_tx, MAX_BINS/2, tx_amp);
@@ -1969,6 +1981,33 @@ void tx_process(
 
 	// The old sdr_modulation_update function is still called for API compatibility
 	// sdr_modulation_update(output_tx, MAX_BINS / 2, tx_amp);  // Commented out - redundant
+
+	// TIMING ANALYSIS: Report timing breakdown every 100 calls (~2 seconds)
+	tx_timing_counter++;
+
+	// Calculate section times in microseconds
+	long section1_us = (tx_t1.tv_sec - tx_t0.tv_sec) * 1000000L + (tx_t1.tv_nsec - tx_t0.tv_nsec) / 1000L;  // Sample gathering
+	long section2_us = (tx_t2.tv_sec - tx_t1.tv_sec) * 1000000L + (tx_t2.tv_nsec - tx_t1.tv_nsec) / 1000L;  // FFT forward
+	long section3_us = (tx_t3.tv_sec - tx_t2.tv_sec) * 1000000L + (tx_t3.tv_nsec - tx_t2.tv_nsec) / 1000L;  // Filtering/rotation
+	long section4_us = (tx_t4.tv_sec - tx_t3.tv_sec) * 1000000L + (tx_t4.tv_nsec - tx_t3.tv_nsec) / 1000L;  // FFT inverse + output
+
+	// Track maximum times for each section
+	if (section1_us > max_section_us[0]) max_section_us[0] = section1_us;
+	if (section2_us > max_section_us[1]) max_section_us[1] = section2_us;
+	if (section3_us > max_section_us[2]) max_section_us[2] = section3_us;
+	if (section4_us > max_section_us[3]) max_section_us[3] = section4_us;
+
+	if (tx_timing_counter >= 100) {
+		long total_us = section1_us + section2_us + section3_us + section4_us;
+		fprintf(stderr, "[TX TIMING] Breakdown (max us): Samples=%ld, FFT_fwd=%ld, Filter=%ld, FFT_inv=%ld, Total=%ld\n",
+		       max_section_us[0], max_section_us[1], max_section_us[2], max_section_us[3],
+		       max_section_us[0] + max_section_us[1] + max_section_us[2] + max_section_us[3]);
+		fflush(stderr);
+
+		// Reset counters
+		tx_timing_counter = 0;
+		max_section_us[0] = max_section_us[1] = max_section_us[2] = max_section_us[3] = 0;
+	}
 }
 
 /*
