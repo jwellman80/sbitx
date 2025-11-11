@@ -142,8 +142,8 @@ void sound_mixer(char *card_name, char *element, int make_on)
 }
 
 int rate = 96000; /* Sample rate */
-static snd_pcm_uframes_t buff_size = 8192; /* Periodsize (bytes) */ 
-static int n_periods_per_buffer = 2;       /* Number of periods */
+static snd_pcm_uframes_t buff_size = 16384; /* Periodsize (bytes) - increased to reduce underruns during CW */
+static int n_periods_per_buffer = 4;       /* Number of periods - increased to reduce underruns */
 //static int n_periods_per_buffer = 1024;       /* Number of periods */
 
 static snd_pcm_t *pcm_play_handle=0;   	//handle for the pcm device
