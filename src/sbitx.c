@@ -1174,10 +1174,16 @@ void rx_linear(int32_t *input_rx, int32_t *input_mic,
 	my_fftw_execute(plan_fwd);
 
 	// STEP 3B: Spectrum update for user interface
-	for (i = 0; i < MAX_BINS; i++)
-		__real__ fft_in[i] *= spectrum_window[i];
-	my_fftw_execute(plan_spectrum);
-	spectrum_update();
+	// Skip spectrum updates during CW modes (both RX and TX) to reduce CPU load and key latency
+	struct rx *r_mode_check = rx_list;
+	int skip_spectrum = (r_mode_check->mode == MODE_CW || r_mode_check->mode == MODE_CWR);
+
+	if (!skip_spectrum) {
+		for (i = 0; i < MAX_BINS; i++)
+			__real__ fft_in[i] *= spectrum_window[i];
+		my_fftw_execute(plan_spectrum);
+		spectrum_update();
+	}
 
 	// STEP 4: Rotate the bins around by r->tuned_bin
 	struct rx *r = rx_list;
