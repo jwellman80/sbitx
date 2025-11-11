@@ -51,6 +51,9 @@ The initial sync between the gui values, the core radio values, settings, et al 
 #include "para_eq.h"
 #include "eq_ui.h"
 #include <time.h>
+#include <pthread.h>
+
+
 extern int get_rx_gain(void);
 extern int calculate_s_meter(struct rx *r, double rx_gain);
 extern struct rx *rx_list;
@@ -85,6 +88,9 @@ int scope_size = 100;	// Default size
 static bool layout_needs_refresh = false;
 static int last_scope_size = -1; // Default to an invalid value initially
 float scope_alpha_plus = 0.0;	 // Default additional scope alpha
+
+pthread_t modem_poll_thread;
+void *modem_poll_function(void *ptr);
 
 #define AVERAGING_FRAMES 15 // Number of frames to average
 // Buffer to hold past spectrum data
@@ -7639,16 +7645,16 @@ gboolean ui_tick(gpointer gook)
 	}
 
 	// every 20 ticks call modem_poll to see if any modes need work done
-	if (ticks % 20 == 0)
-		modem_poll(mode_id(get_field("r1:mode")->value));
-	else
-	{
-		// calling modem_poll every 20 ticks isn't enough to keep up with a fast
-		// straight key, so now we go on _every_ tick in MODE_CW or MODE_CWR
-		if ((mode_id(get_field("r1:mode")->value)) == MODE_CW ||
-			(mode_id(get_field("r1:mode")->value)) == MODE_CWR)
-			modem_poll(mode_id(get_field("r1:mode")->value));
-	}
+	// if (ticks % 20 == 0)
+	// 	modem_poll(mode_id(get_field("r1:mode")->value));
+	// else
+	// {
+	// 	// calling modem_poll every 20 ticks isn't enough to keep up with a fast
+	// 	// straight key, so now we go on _every_ tick in MODE_CW or MODE_CWR
+	// 	if ((mode_id(get_field("r1:mode")->value)) == MODE_CW ||
+	// 		(mode_id(get_field("r1:mode")->value)) == MODE_CWR)
+	// 		modem_poll(mode_id(get_field("r1:mode")->value));
+	// }
 
 	int tick_count = 100;
 
@@ -7848,6 +7854,17 @@ gboolean ui_tick(gpointer gook)
 	return TRUE;
 }
 
+void *modem_poll_function(void *ptr)
+{
+	sleep(1); // wait for things to settle
+	while (1)
+	{
+		modem_poll(mode_id(get_field("r1:mode")->value));
+		usleep(10000); // sleep for 10 ms
+	}
+	return NULL;
+}
+
 void ui_init(int argc, char *argv[], int fullscreen)
 {
 
@@ -7905,6 +7922,7 @@ void ui_init(int argc, char *argv[], int fullscreen)
 	focus_field(get_field("r1:volume"));
 	webserver_start();
 	f_last_text = get_field_by_label("TEXT");
+	pthread_create( &modem_poll_thread, NULL, modem_poll_function, NULL);
 }
 
 /* handle modem callbacks for more data */
