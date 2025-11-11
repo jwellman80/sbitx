@@ -1963,6 +1963,13 @@ void sound_process(
 	int32_t *output_speaker, int32_t *output_tx,
 	int n_samples)
 {
+	// Measure audio callback timing to find bottlenecks
+	static struct timespec timing_start, timing_end;
+	static long max_process_time_us = 0;
+	static int timing_counter = 0;
+
+	clock_gettime(CLOCK_MONOTONIC, &timing_start);
+
 	if (in_tx)
 	{
 		tx_process(input_rx, input_mic, output_speaker, output_tx, n_samples);
@@ -1975,6 +1982,25 @@ void sound_process(
 	if (pf_record)
 	{
 		wav_record(in_tx == 0 ? output_speaker : input_mic, n_samples);
+	}
+
+	// Track worst-case processing time
+	clock_gettime(CLOCK_MONOTONIC, &timing_end);
+	long process_time_us = (timing_end.tv_sec - timing_start.tv_sec) * 1000000L +
+	                       (timing_end.tv_nsec - timing_start.tv_nsec) / 1000L;
+
+	if (process_time_us > max_process_time_us) {
+		max_process_time_us = process_time_us;
+	}
+
+	// Print stats every 100 callbacks (~2 seconds at 96kHz/1024 samples)
+	if (++timing_counter >= 100) {
+		timing_counter = 0;
+		// Expected time: 1024 samples @ 96kHz = 10666 us
+		printf("Audio callback: max=%ld us (expected ~10666 us), %s\n",
+		       max_process_time_us,
+		       max_process_time_us > 10000 ? "WARNING: OVERRUN!" : "OK");
+		max_process_time_us = 0;
 	}
 }
 

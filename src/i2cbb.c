@@ -32,6 +32,41 @@ static int i2c_error = 0;
 
 // Global mutex for I2C bus access protection
 static pthread_mutex_t i2c_bus_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// I2C mutex contention tracking
+static unsigned long i2c_lock_wait_count = 0;
+static unsigned long i2c_lock_attempts = 0;
+static struct timespec i2c_lock_start, i2c_lock_end;
+
+static inline void i2c_lock_acquire(void) {
+	i2c_lock_attempts++;
+	clock_gettime(CLOCK_MONOTONIC, &i2c_lock_start);
+
+	// Try non-blocking first to detect contention
+	if (pthread_mutex_trylock(&i2c_bus_mutex) != 0) {
+		// Contention detected - another thread has the lock
+		i2c_lock_wait_count++;
+		pthread_mutex_lock(&i2c_bus_mutex); // Now block until available
+
+		clock_gettime(CLOCK_MONOTONIC, &i2c_lock_end);
+		long wait_us = (i2c_lock_end.tv_sec - i2c_lock_start.tv_sec) * 1000000L +
+		               (i2c_lock_end.tv_nsec - i2c_lock_start.tv_nsec) / 1000L;
+
+		// Warn if blocking for more than 1ms (bad for audio thread)
+		if (wait_us > 1000) {
+			static int warn_count = 0;
+			if (++warn_count % 10 == 0) {
+				printf("I2C mutex contention: waited %ld us (count=%lu/%lu = %.1f%%)\n",
+				       wait_us, i2c_lock_wait_count, i2c_lock_attempts,
+				       100.0 * i2c_lock_wait_count / i2c_lock_attempts);
+			}
+		}
+	}
+}
+
+static inline void i2c_lock_release(void) {
+	pthread_mutex_unlock(&i2c_bus_mutex);
+}
 void i2cbb_init(uint8_t pin_number_sda, uint8_t pin_number_scl) 
 {
 	PIN_SDA = pin_number_sda;
@@ -232,7 +267,7 @@ int32_t i2cbb_write_byte_data(uint8_t i2c_address, uint8_t command, uint8_t valu
     // 7 bit address + 1 bit read/write
     // read = 1, write = 0
     // http://www.totalphase.com/support/articles/200349176-7-bit-8-bit-and-10-bit-I2C-Slave-Addressing
-    pthread_mutex_lock(&i2c_bus_mutex);
+    i2c_lock_acquire();
 
     uint8_t address = (i2c_address << 1) | 0;
     int32_t result = -1;
@@ -249,14 +284,14 @@ int32_t i2cbb_write_byte_data(uint8_t i2c_address, uint8_t command, uint8_t valu
     else
         i2c_stop_cond();
 
-    pthread_mutex_unlock(&i2c_bus_mutex);
+    i2c_lock_release();
     return result;
 }
 
 // This executes the SMBus "read byte" protocol, returning negative errno else a data byte received from the device.
 int32_t i2cbb_read_byte_data(uint8_t i2c_address, uint8_t command) {
 
-    pthread_mutex_lock(&i2c_bus_mutex);
+    i2c_lock_acquire();
 
     uint8_t address = (i2c_address << 1) | 0;
     int32_t result = -1;
@@ -276,7 +311,7 @@ int32_t i2cbb_read_byte_data(uint8_t i2c_address, uint8_t command) {
     else
         i2c_stop_cond();
 
-    pthread_mutex_unlock(&i2c_bus_mutex);
+    i2c_lock_release();
     return result;
 }
 
@@ -289,7 +324,7 @@ int32_t i2cbb_read_byte_data(uint8_t i2c_address, uint8_t command) {
 int32_t i2cbb_write_i2c_block_data(uint8_t i2c_address, uint8_t command,
 	uint8_t length, const uint8_t * values) {
 
-	pthread_mutex_lock(&i2c_bus_mutex);
+	i2c_lock_acquire();
 
 	i2c_error = 0;
 	uint8_t address = (i2c_address << 1) | 0;
@@ -326,7 +361,7 @@ int32_t i2cbb_write_i2c_block_data(uint8_t i2c_address, uint8_t command,
 			address, command, length);
 	}
 
-	pthread_mutex_unlock(&i2c_bus_mutex);
+	i2c_lock_release();
 	return result;
 }
 
@@ -335,7 +370,7 @@ int32_t i2cbb_write_i2c_block_data(uint8_t i2c_address, uint8_t command,
 int32_t i2cbb_read_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t length,
         uint8_t* values) {
 
-	pthread_mutex_lock(&i2c_bus_mutex);
+	i2c_lock_acquire();
 
 	uint8_t address = (i2c_address << 1) | 0;
 /*
@@ -359,7 +394,7 @@ int32_t i2cbb_read_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t 
 	if (i2c_write_byte(1, 0, address)){
 		i2c_stop_cond();
 //		printf("i2cbb.c:writing address failed at %x\n", i2c_address);
-		pthread_mutex_unlock(&i2c_bus_mutex);
+		i2c_lock_release();
 		return -1;
 	}
 
@@ -371,20 +406,20 @@ int32_t i2cbb_read_i2c_block_data(uint8_t i2c_address, uint8_t command, uint8_t 
 
 	i2c_stop_cond();
 
-	pthread_mutex_unlock(&i2c_bus_mutex);
+	i2c_lock_release();
 	return length;
 }
 
 int32_t i2cbb_read_rll(uint8_t i2c_address, uint8_t* values) {
 
-	pthread_mutex_lock(&i2c_bus_mutex);
+	i2c_lock_acquire();
 
 	uint8_t address = (i2c_address << 1) | 0;
 
 	address = (i2c_address << 1) | 1;
 	if (i2c_write_byte(1, 0, address)){
 		i2c_stop_cond();
-		pthread_mutex_unlock(&i2c_bus_mutex);
+		i2c_lock_release();
 		return -1;
 	}
 
@@ -397,6 +432,6 @@ int32_t i2cbb_read_rll(uint8_t i2c_address, uint8_t* values) {
 
 	i2c_stop_cond();
 
-	pthread_mutex_unlock(&i2c_bus_mutex);
+	i2c_lock_release();
 	return length;
 }
