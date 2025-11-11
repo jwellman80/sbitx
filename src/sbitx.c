@@ -2318,13 +2318,16 @@ void tr_switch_v2(int tx_on) {
   if (tx_on) {                   // switch to transmit
 	//digitalWrite(RX_LINE, LOW);
     in_tx = 1;                   // raise a flag so functions see we are in transmit mode
-    sound_mixer(audio_card, "Master", 0);  // mute audio while switching to transmit
-    sound_mixer(audio_card, "Capture", 0);
+    // Removed blocking sound_mixer calls to reduce TX latency - mute_count handles audio muting
+    //sound_mixer(audio_card, "Master", 0);  // mute audio while switching to transmit
+    //sound_mixer(audio_card, "Capture", 0);
 		if (rx_list->mode != MODE_CW && rx_list->mode != MODE_CWR) {
 		delay(20);
+		mute_count = 20;             // number of audio samples to zero out for SSB/AM
 	}
-    //mute_count = 20;             // number of audio samples to zero out
-    mute_count = 1;             // number of audio samples to zero out
+	else {
+		mute_count = 1;             // minimal muting for CW for fast break-in
+	}
 	fft_reset_m_bins();          // fixes burst at start of transmission
     set_tx_power_levels();       // use values for tx_power_watts, tx_gain
     //ADDED BY KF7YDU - Check if ptt is enabled, if so, set ptt pin to high
@@ -2342,8 +2345,9 @@ void tr_switch_v2(int tx_on) {
 
   } else {                       // switch to receive
     in_tx = 0;                   // lower the transmit flag
-    sound_mixer(audio_card, "Master", 0);  // mute audio while switching to receive
-    sound_mixer(audio_card, "Capture", 0);
+    // Removed blocking sound_mixer calls from TX->RX transition - mute_count handles the transition
+    //sound_mixer(audio_card, "Master", 0);  // mute audio while switching to receive
+    //sound_mixer(audio_card, "Capture", 0);
     fft_reset_m_bins();
     mute_count = MUTE_MAX;
     digitalWrite(EXT_PTT, LOW);  // added by KF7YDU - shuts down ext_ptt
