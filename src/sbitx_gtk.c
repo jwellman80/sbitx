@@ -6607,10 +6607,8 @@ void init_gpio_pins()
 		pullUpDnControl(pins[i], PUD_UP);
 	}
 
-	pinMode(PTT, INPUT);
-	pullUpDnControl(PTT, PUD_UP);
-	pinMode(DASH, INPUT);
-	pullUpDnControl(DASH, PUD_UP);
+	// Initialize interrupt-driven CW key inputs instead of polling
+	key_init_interrupts();
 }
 
 uint8_t dec2bcd(uint8_t val)
@@ -6822,20 +6820,61 @@ void check_read_ina260_cadence(float *voltage, float *current)
 	}
 }
 
+// Volatile variables to store key state from interrupt handlers
+static volatile int ptt_pin_state = HIGH;
+static volatile int dash_pin_state = HIGH;
+static volatile unsigned long last_key_interrupt_time = 0;
+
+// Interrupt handler for PTT pin (GPIO 7)
+void ptt_interrupt_handler(void) {
+  ptt_pin_state = digitalRead(PTT);
+  last_key_interrupt_time = millis();
+}
+
+// Interrupt handler for DASH pin (GPIO 21)
+void dash_interrupt_handler(void) {
+  dash_pin_state = digitalRead(DASH);
+  last_key_interrupt_time = millis();
+}
+
+// Initialize interrupt-driven key inputs
+void key_init_interrupts(void) {
+  // Set pins as inputs with pull-ups
+  pinMode(PTT, INPUT);
+  pullUpDnControl(PTT, PUD_UP);
+  pinMode(DASH, INPUT);
+  pullUpDnControl(DASH, PUD_UP);
+
+  // Read initial state
+  ptt_pin_state = digitalRead(PTT);
+  dash_pin_state = digitalRead(DASH);
+
+  // Register interrupt handlers for both edges (press and release)
+  if (wiringPiISR(PTT, INT_EDGE_BOTH, &ptt_interrupt_handler) < 0) {
+    fprintf(stderr, "Unable to setup PTT interrupt: %s\n", strerror(errno));
+  }
+  if (wiringPiISR(DASH, INT_EDGE_BOTH, &dash_interrupt_handler) < 0) {
+    fprintf(stderr, "Unable to setup DASH interrupt: %s\n", strerror(errno));
+  }
+
+  printf("CW key interrupts initialized on GPIO %d (PTT) and GPIO %d (DASH)\n", PTT, DASH);
+}
+
 int key_poll() {
   int key = CW_IDLE;
   int input_method = get_cw_input_method();
- 
-  // Handle straight key input
+
+  // Read state from interrupt-updated volatile variables instead of polling GPIO
+  // This provides instant response with zero polling latency
   if (input_method == CW_STRAIGHT) {
-    if ((digitalRead(PTT) == LOW) || (digitalRead(DASH) == LOW)) {
+    if ((ptt_pin_state == LOW) || (dash_pin_state == LOW)) {
       key = CW_DOWN;
     }
-  } 
+  }
   // Handle paddle input
-  else {  
-    if (digitalRead(PTT) == LOW) key |= CW_DASH;
-    if (digitalRead(DASH) == LOW) key |= CW_DOT; 
+  else {
+    if (ptt_pin_state == LOW) key |= CW_DASH;
+    if (dash_pin_state == LOW) key |= CW_DOT;
     if (key == (CW_DASH | CW_DOT))
       key = CW_SQUEEZE;  // key has dash AND dot bits set
     }
