@@ -3821,7 +3821,7 @@ void menu2_display(int show) {
     	field_move("FULLSCREEN", screen_width - 197, screen_height - 80, 95, 37); // Add FULLSCR field
 		field_move("PWR-DWN", screen_width - 97, screen_height - 80, 95, 37); // Add PWR-DWN field
 
-		    strcmp(current_mode, "CWR") != 0)	{
+		//    strcmp(current_mode, "CWR") != 0)	{
 		// Move the fields off-screen if not showing
 		// field_move("WFMIN", -1000, screen_height - 140, 70, 45);
 		// field_move("WFMAX", -1000, screen_height - 140, 70, 45);
