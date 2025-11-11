@@ -234,4 +234,3 @@ if __name__ == "__main__":
     win.connect("destroy", lambda w: (remove_lock_file(), Gtk.main_quit()))
     win.show_all()
     Gtk.main()
-    remove_lock_file()

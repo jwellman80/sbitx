@@ -39,17 +39,20 @@ FILE *pf_debug = NULL;
 // unsigned int	wallclock = 0;
 
 #define TX_LINE 4
+#define RX_LINE 16
 #define TX_POWER 27
 #define BAND_SELECT 5
 #define LPF_A 5
 #define LPF_B 6
 #define LPF_C 10
 #define LPF_D 11
+#define LPF_E 26
 
 #define SBITX_DE (0)
 #define SBITX_V2 (1)
+#define SBITX_V4 (4)
 
-int sbitx_version = SBITX_V2;
+int sbitx_version = -1;
 int fwdpower, vswr;
 int fwdpower_calc;
 int fwdpower_cnt;
@@ -600,12 +603,14 @@ void set_lpf_40mhz(int frequency)
 
 	if (frequency < 5500000)
 		lpf = LPF_D;
-	else if (frequency < 10500000)
+	else if (frequency < 10500000)		
 		lpf = LPF_C;
-	else if (frequency < 18500000)
+	else if (frequency < 21500000 && sbitx_version >= 4)
 		lpf = LPF_B;
-	else if (frequency < 30000000)
-		lpf = LPF_A;
+	else if (frequency < 18500000)		
+		lpf = LPF_B;
+	else if (frequency < 30000000) 
+		lpf = LPF_A; 
 
 	if (lpf == prev_lpf)
 	{
@@ -623,6 +628,7 @@ void set_lpf_40mhz(int frequency)
 	digitalWrite(LPF_B, LOW);
 	digitalWrite(LPF_C, LOW);
 	digitalWrite(LPF_D, LOW);
+	digitalWrite(LPF_E, LOW);
 
 #if DEBUG > 0
 	printf("################ setting %d high\n", lpf);
@@ -637,7 +643,8 @@ void set_rx1(int frequency)
 		return;
 	radio_tune_to(frequency);
 	freq_hdr = frequency;
-	set_lpf_40mhz(frequency);
+	if (sbitx_version  < 4) 
+		set_lpf_40mhz(frequency);
 }
 
 void set_volume(double v)
@@ -1542,14 +1549,10 @@ void read_power()
 	memcpy(&vref, response + 2, 2);
 	//	printf("%d:%d\n", vfwd, vref);
 
-	// Very low power readings may spoil the swr calculation, especially in CW modes between symbols
-	// Better not to calculate the swr at all if the measured power is under a very minimal level
-	if (vfwd > 3) {
-		if (vref >= vfwd)
-			vswr = 100;
-		else
-			vswr = (10 * (vfwd + vref)) / (vfwd - vref);
-	}
+        if (vref >= vfwd)
+		vswr = 100;
+	else
+		vswr = (10 * (vfwd + vref)) / (vfwd - vref);
 
 	// here '400' is the scaling factor as our ref power output is 40 watts
 	// this calculates the power as 1/10th of a watt, 400 = 40 watts
@@ -1838,6 +1841,10 @@ void tx_process(
 		// output_tx[i] = 0;
 	}
 	//	printf("min %d, max %d\n", min, max);
+	
+	if (sbitx_version < 4)
+		read_power();
+	sdr_modulation_update(output_tx, MAX_BINS/2, tx_amp);
 
 	read_power();
 
@@ -2060,6 +2067,8 @@ static int hw_settings_handler(void *user, const char *section,
 	// Add variable for SSB/CW Power Factor Adjustment W9JES
 	if (!strcmp(name, "ssb_val"))
 		ssb_val = atof(value);
+	if (!strcmp(name, "hw"))
+		sbitx_version = atoi(value);
 	// Add TCXO Calibration W9JES/KK4DAS
 	if (!strcmp(section, "tcxo"))
 	{
@@ -2221,17 +2230,86 @@ void tx_cal()
 // removed several delay() calls
 // eliminated LPF switching during tr_switch
 
-void tr_switch_de(int tx_on) {
+//void tr_switch_de(int tx_on) {
   // function replaced by tr_switch, should never be called
-}
+//}
 
-void tr_switch_v2(int tx_on) {
+//void tr_switch_v2(int tx_on) {
   // function replaced by tr_switch, should never be called
-}
+//}
 
-// transmit-receive switch for both sbitx DE and V2 and newer
-void tr_switch(int tx_on) {
+// transmit-receive switch for zbitx, xbitx, v4
+// w9jes testing
+
+void tr_switch_v4(int tx_on) {
   if (tx_on) {                   // switch to transmit
+		digitalWrite(RX_LINE, LOW);
+
+		//first turn off the LPFs, so PA doesnt connect 
+ 		digitalWrite(LPF_A, LOW);
+ 		digitalWrite(LPF_B, LOW);
+ 		digitalWrite(LPF_C, LOW);
+ 		digitalWrite(LPF_D, LOW);
+ 		digitalWrite(LPF_E, LOW);
+
+    in_tx = 1;                   // raise a flag so functions see we are in transmit mode
+    sound_mixer(audio_card, "Master", 0);  // mute audio while switching to transmit
+    sound_mixer(audio_card, "Capture", 0);
+		if (rx_list->mode != MODE_CW && rx_list->mode != MODE_CWR) {
+		delay(20);
+	}
+    //mute_count = 20;             // number of audio samples to zero out
+    mute_count = 1;             // number of audio samples to zero out
+	fft_reset_m_bins();          // fixes burst at start of transmission
+    set_tx_power_levels();       // use values for tx_power_watts, tx_gain
+    //ADDED BY KF7YDU - Check if ptt is enabled, if so, set ptt pin to high
+			if (ext_ptt_enable == 1) {
+				digitalWrite(EXT_PTT, HIGH);
+				delay(20); //this delay gives time for ext device to settle before tx
+			}
+    digitalWrite(TX_LINE, HIGH);  // power up PA and disconnect receiver
+    spectrum_reset();
+
+    // Also reset the hold counter for showing the output power
+    fwdpower_cnt = 0;
+    fwdpower_calc = 0;
+    fwdpower = 0;
+
+  } else {                       // switch to receive
+    in_tx = 0;                   // lower the transmit flag
+		digitalWrite(TX_LINE, LOW);
+    sound_mixer(audio_card, "Master", 0);  // mute audio while switching to receive
+    sound_mixer(audio_card, "Capture", 0);
+    fft_reset_m_bins();
+    mute_count = MUTE_MAX;
+		digitalWrite(LPF_A, LOW);
+		digitalWrite(LPF_B, LOW);
+ 	 	digitalWrite(LPF_C, LOW);
+ 	 	digitalWrite(LPF_D, LOW);
+ 	 	digitalWrite(LPF_E, LOW);
+    digitalWrite(EXT_PTT, LOW);  // added by KF7YDU - shuts down ext_ptt
+    delay(5);
+    digitalWrite(TX_LINE, LOW);  // use T/R switch to connect rcvr
+    //digitalWrite(RX_LINE, HIGH);
+    check_r1_volume();           // audio codec is back on
+    initialize_rx_vol();         // added to set volume after tx -W2JON W9JES KB2ML
+    sound_mixer(audio_card, "Master", rx_vol);
+    sound_mixer(audio_card, "Capture", rx_gain);
+    spectrum_reset();
+		digitalWrite(RX_LINE, HIGH);
+
+    // Also reset the hold counter for showing the output power
+    fwdpower_cnt = 0;
+    fwdpower_calc = 0;
+    fwdpower = 0;
+  }
+}
+
+
+// transmit-receive switch for both sbitx DE and V2 and V3
+void tr_switch_v2(int tx_on) {
+  if (tx_on) {                   // switch to transmit
+	//digitalWrite(RX_LINE, LOW);
     in_tx = 1;                   // raise a flag so functions see we are in transmit mode
     sound_mixer(audio_card, "Master", 0);  // mute audio while switching to transmit
     sound_mixer(audio_card, "Capture", 0);
@@ -2264,6 +2342,7 @@ void tr_switch(int tx_on) {
     digitalWrite(EXT_PTT, LOW);  // added by KF7YDU - shuts down ext_ptt
     delay(5);
     digitalWrite(TX_LINE, LOW);  // use T/R switch to connect rcvr
+    //digitalWrite(RX_LINE, HIGH);
     check_r1_volume();           // audio codec is back on
     initialize_rx_vol();         // added to set volume after tx -W2JON W9JES KB2ML
     sound_mixer(audio_card, "Master", rx_vol);
@@ -2276,6 +2355,20 @@ void tr_switch(int tx_on) {
     fwdpower = 0;
   }
 }
+
+void tr_switch(int tx_on){
+	switch(sbitx_version){
+		case SBITX_DE:
+			tr_switch_v2(tx_on);
+			break;
+		case SBITX_V4:
+			tr_switch_v4(tx_on);
+			break;
+		default:
+			tr_switch_v2(tx_on);
+	}
+}
+
 
 /*
 This is the one-time initialization code
@@ -2290,6 +2383,7 @@ void setup()
 	// setup the LPF and the gpio pins
 	pinMode(TX_LINE, OUTPUT);
 	pinMode(TX_POWER, OUTPUT);
+	pinMode(RX_LINE, OUTPUT);
 	pinMode(EXT_PTT, OUTPUT); // ADDED BY KF7YDU
 	pinMode(LPF_A, OUTPUT);
 	pinMode(LPF_B, OUTPUT);
@@ -2305,6 +2399,7 @@ void setup()
 
 	digitalWrite(TX_LINE, LOW);
 	digitalWrite(TX_POWER, LOW);
+	digitalWrite(RX_LINE, HIGH);
 
 	fft_init();
 	vfo_init_phase_table();
@@ -2327,12 +2422,15 @@ void setup()
 	tx_init(7000000, MODE_LSB, -3000, -150);
 
 	// detect the version of sbitx
-	uint8_t response[4];
-	if (i2cbb_read_i2c_block_data(0x8, 0, 4, response) == -1)
-		sbitx_version = SBITX_DE;
-	else
-		sbitx_version = SBITX_V2;
+	if (sbitx_version == -1){
+		uint8_t response[4];
+		if(i2cbb_read_i2c_block_data(0x8, 0, 4, response) == -1)
+			sbitx_version = SBITX_DE;
+		else
+			sbitx_version = SBITX_V2;
+	}
 
+    printf("hw version: %d\n", sbitx_version);
 	setup_audio_codec();
 	sound_thread_start("plughw:0,0");
 
