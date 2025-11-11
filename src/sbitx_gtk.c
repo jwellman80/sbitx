@@ -7291,7 +7291,6 @@ static void zbitx_logs(){
 }
 
 void zbitx_poll(int all){
-	return; //temporarily disable zbitx comms
 	char buff[3000];
 	static unsigned int last_update = 0;
 
