@@ -220,6 +220,9 @@ struct morse_rx morse_rx_table[] = {
 	{"ur", "..-.-."},
 };
 
+// Fast O(1) lookup table for morse code - replaces linear search
+static char* morse_lookup[128] = {NULL};
+
 // Initialize fast morse lookup table - O(1) instead of O(n) search
 static void init_morse_lookup() {
 	// Clear all entries
@@ -309,9 +312,6 @@ char cw_key_letter[CW_MAX_SYMBOLS];
 static char cw_console_queue[CW_CONSOLE_QUEUE_SIZE];
 static volatile int cw_console_queue_head = 0;
 static volatile int cw_console_queue_tail = 0;
-
-// Fast O(1) lookup table for morse code - replaces linear search
-static const char* morse_lookup[128] = {NULL};
 
 // Cache pitch value to avoid 96,000 get_pitch() calls per second
 static int cached_pitch = -1;
