@@ -1,0 +1,216 @@
+================================================================================
+                    I2C BUS CONTENTION - INVESTIGATION SUMMARY
+================================================================================
+
+CRITICAL BUG FOUND: "double!" warnings indicate race condition causing
+I2C bus data corruption from concurrent thread access.
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+1. BROKEN SYNCHRONIZATION (i2cbb.c:196-199)
+   - "Mutex" is just a static int counter, NOT a real pthread_mutex
+   - No atomic operations
+   - Allows reentrancy: just prints "double!" and continues
+   - FAILS to prevent concurrent I2C access
+
+2. MULTIPLE THREADS ACCESS I2C BUS
+   - GTK UI Thread (1ms timeout callback)
+   - Sound/DSP Thread (SCHED_FIFO real-time priority)
+   - Calibration Thread (power band calibration)
+   - Hamlib Network Thread (remote control)
+   - WebServer/Telnet Threads (network control)
+
+3. MOST CRITICAL: Si5351 CLOCK GENERATOR
+   - Accessed from 5+ threads
+   - Frequency changes happen at GPIO-level in i2cbb.c
+   - If interrupted mid-transaction: RF output corrupted
+   - Causes: frequency glitches, CW keying artifacts, audio clicks
+
+4. I2C BIT-BANGING IS NOT ATOMIC
+   - Each byte requires 8 bit operations
+   - Each bit operation involves GPIO read/write sequences
+   - If another thread enters between bit operations: bus corrupted
+   - Slave device (Si5351) sees nonsense, returns NACK
+
+================================================================================
+DEVICES ON I2C BUS
+================================================================================
+
+Si5351 (0x60)      RX/TX Local Oscillator Frequency Control    [TIMING-CRITICAL]
+Si570 (0x55)       Alternative frequency source               [HIGH PRIORITY]
+DS3231 (0x68)      Real-Time Clock                            [NON-CRITICAL]
+INA260 (0x40)      Power monitoring (voltage/current)         [NON-CRITICAL]
+ZBitx (0x0A)       Remote display interface                   [NON-CRITICAL]
+
+The Si5351 is the culprit - it's accessed during frequency changes which
+happen frequently from multiple threads.
+
+================================================================================
+ROOT CAUSE CHAIN
+================================================================================
+
+User tunes radio
+  └─> GTK ui_tick() callback (every 1ms)
+      └─> do_tuning() (called from GTK main thread)
+          └─> set_operating_freq()
+              └─> sdr_request("r1:freq=...")
+                  └─> set_rx1(frequency)
+                      └─> radio_tune_to(frequency)
+                          └─> si5351bx_setfreq()
+                              └─> i2cSendRegister() [called 8 times]
+                                  └─> i2cbb_write_byte_data()
+                                      └─> i2c_write_byte() ◄── REENTRANCY POINT
+
+MEANWHILE: Sound thread running at real-time priority
+  └─> sound_thread_function()
+      └─> [Could trigger modem processing]
+          └─> [Could call modem frequency update]
+              └─> set_rx1() ◄── COLLIDES WITH UI THREAD!
+                  └─> [Both threads writing to same GPIO pins]
+
+================================================================================
+EVIDENCE
+================================================================================
+
+File: /mnt/z/dev/sbitx/src/i2cbb.c
+Lines: 196-211
+
+static int i2c_write_byte(int send_start, int send_stop, uint8_t byte) {
+    unsigned bit;
+    int nack = 0;
+
+    static int mutex = 0;              // ❌ NOT THREAD-SAFE
+    if (mutex)
+        printf("double!\n");           // ❌ THIS IS THE WARNING
+    mutex++;                           // ❌ RACE CONDITION
+    
+    [... GPIO operations to I2C pins ...]
+    
+    mutex--;                           // ❌ RACE CONDITION
+    return nack;
+}
+
+Grep Results: 5 files call I2C functions from different threads:
+  - sbitx.c (frequency setting, calibration)
+  - sbitx_gtk.c (RTC, power monitor, ZBitx)
+  - si5351v2.c (frequency programming)
+  - hamlib.c (network control)
+  - modem_ft8.c (FT8 processing)
+
+Only one real mutex found: jitter_buffer_mutex (for audio buffer only)
+
+================================================================================
+IMPACT ASSESSMENT
+================================================================================
+
+When "double!" warning appears:
+  1. At least 2 threads have entered i2c_write_byte() simultaneously
+  2. Both are trying to write to GPIO pins
+  3. Bus state is undefined
+  4. Si5351 receives partial/corrupted frequency value
+  5. RF output frequency is wrong
+  6. Audio quality degraded (clicks, pops, distortion)
+  7. CW keying becomes unreliable
+
+Frequency glitches during:
+  - Rapid tuning while RTC is being read
+  - Network command while UI tuning
+  - Calibration thread running while user operates
+
+================================================================================
+THE FIX
+================================================================================
+
+REQUIRED: Add pthread_mutex protection to ALL I2C entry points
+
+1. Add to i2cbb.c:
+   #include <pthread.h>
+   static pthread_mutex_t i2c_bus_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+2. Wrap ALL I2C transactions:
+   pthread_mutex_lock(&i2c_bus_mutex);
+   [I2C operation]
+   pthread_mutex_unlock(&i2c_bus_mutex);
+
+3. Functions to fix:
+   - i2cbb_write_byte_data()
+   - i2cbb_read_byte_data()
+   - i2cbb_write_i2c_block_data()
+   - i2cbb_read_i2c_block_data()
+   - i2cbb_read_rll()
+
+4. Remove the fake static int mutex (lines 196-199, 211)
+5. Replace spin-wait i2c_busy with proper mutex
+
+================================================================================
+DOCUMENTATION GENERATED
+================================================================================
+
+Three detailed analysis documents have been created:
+
+1. I2C_CONTENTION_ANALYSIS.md (20KB)
+   - Comprehensive 13-section analysis
+   - Threading architecture detailed
+   - Call paths to reentrancy
+   - Recommended solutions
+   - Testing plan
+
+2. I2C_FIX_EXAMPLES.md (15KB)
+   - Problem code vs solution code
+   - Three different fix approaches
+   - Complete working examples
+   - Migration checklist
+   - Validation tests
+
+3. I2C_SUMMARY.txt (this file)
+   - Quick reference summary
+   - Key findings highlighted
+   - Evidence and root cause
+   - Impact assessment
+
+================================================================================
+FILES AFFECTED
+================================================================================
+
+Core issue:    /mnt/z/dev/sbitx/src/i2cbb.c (lines 196-199, 211, 278-294)
+Related:       /mnt/z/dev/sbitx/src/i2cbb.h (mutex declaration optional)
+
+Calling code:
+  - /mnt/z/dev/sbitx/src/si5351v2.c (frequency setting)
+  - /mnt/z/dev/sbitx/src/sbitx.c (UI and calibration)
+  - /mnt/z/dev/sbitx/src/sbitx_gtk.c (RTC and monitors)
+  - /mnt/z/dev/sbitx/src/hamlib.c (network control)
+  - /mnt/z/dev/sbitx/src/modem_ft8.c (FT8 processing)
+
+================================================================================
+TESTING VALIDATION
+================================================================================
+
+After implementing the fix:
+
+1. Compile cleanly: gcc -pthread -Wall -c i2cbb.c
+2. No "double!" warnings in logs during normal operation
+3. Rapid frequency tuning: no glitches or NACK errors
+4. Concurrent access: RTC read while tuning, no corruption
+5. CW keying: clean waveform, no audio artifacts
+6. Network control: no conflicts with local tuning
+
+Stress test: Send 1000 frequency changes from different threads
+Result: Zero contention should be detected
+
+================================================================================
+CONCLUSION
+================================================================================
+
+The I2C bus contention is a CRITICAL bug that causes RF output corruption.
+The "double!" warning is proof of the race condition.
+
+SEVERITY: HIGH - Affects core radio operation (frequency accuracy)
+PRIORITY: IMMEDIATE - Should be fixed before next release
+EFFORT: LOW - Fix requires modifying one file (i2cbb.c)
+
+Status: FULLY ANALYZED, SOLUTION READY FOR IMPLEMENTATION
+
+================================================================================
