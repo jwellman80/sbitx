@@ -316,6 +316,12 @@ static volatile int cw_console_queue_tail = 0;
 // Cache pitch value to avoid 96,000 get_pitch() calls per second
 static int cached_pitch = -1;
 
+// Cache CW delay to avoid repeated field lookups + atoi() in sample generation
+static int cached_cw_delay = 100;  // Default 100ms
+
+// Track last queued character to prevent duplicates
+static char last_queued_char = '\0';
+
 static uint8_t cw_get_next_symbol(){  //symbol to translate into CW_DOT, CW_DASH, etc
 
 	if (!symbol_next)
@@ -372,10 +378,15 @@ static int cw_read_key(){
 	if (lowercase >= 0 && lowercase < 128 && morse_lookup[(int)lowercase]) {
 		symbol_next = morse_lookup[(int)lowercase];
 		// Queue character for console display - moved out of real-time path
-		int next_head = (cw_console_queue_head + 1) % CW_CONSOLE_QUEUE_SIZE;
-		if (next_head != cw_console_queue_tail) {
-			cw_console_queue[cw_console_queue_head] = toupper(c);
-			cw_console_queue_head = next_head;
+		// Only queue if different from last character to prevent duplicates
+		char display_char = toupper(c);
+		if (display_char != last_queued_char) {
+			int next_head = (cw_console_queue_head + 1) % CW_CONSOLE_QUEUE_SIZE;
+			if (next_head != cw_console_queue_tail) {
+				cw_console_queue[cw_console_queue_head] = display_char;
+				cw_console_queue_head = next_head;
+				last_queued_char = display_char;
+			}
 		}
 	} else {
 		// Default to first symbol if not found
@@ -395,7 +406,7 @@ void handle_cw_state_machine(uint8_t, uint8_t);
 float cw_tx_get_sample() {
   float sample = 0;
   uint8_t state_machine_mode;
-  uint8_t symbol_now;
+  uint8_t symbol_now = CW_IDLE;  // Initialize to avoid using uninitialized value
   
   if ((keydown_count == 0) && (keyup_count == 0)) {
     // note current time to use with UI value of CW_DELAY to control break-in
@@ -444,7 +455,7 @@ float cw_tx_get_sample() {
   if ((symbol_now == CW_DOWN) || (symbol_now == CW_DOT) ||
       (symbol_now == CW_DASH) || (symbol_now == CW_SQUEEZE) ||
       (keydown_count > 0))
-    cw_tx_until = millis_now + get_cw_delay();
+    cw_tx_until = millis_now + cached_cw_delay;  // Use cached value instead of field lookup
   // if macro or keyboard characters remain in the buffer
   // prevent switching from xmit to rcv and cutting off macro
   if (cw_bytes_available != 0)
@@ -1309,6 +1320,10 @@ void cw_poll(int bytes_available, int tx_is_on){
 		write_console(FONT_CW_TX, buff);
 		cw_console_queue_tail = (cw_console_queue_tail + 1) % CW_CONSOLE_QUEUE_SIZE;
 	}
+	// Reset duplicate tracker after queue is empty
+	if (cw_console_queue_tail == cw_console_queue_head) {
+		last_queued_char = '\0';
+	}
 
 	cw_bytes_available = bytes_available;
 	cw_key_state = key_poll();
@@ -1318,6 +1333,9 @@ void cw_poll(int bytes_available, int tx_is_on){
 	//retune the rx pitch if needed and update cached TX pitch
 	int cw_rx_pitch = field_int("PITCH");
 	cached_pitch = cw_rx_pitch;  // Update cache to avoid 96k calls/sec in sample generation
+
+	// Update cached CW delay to avoid field lookup + atoi() in sample generation
+	cached_cw_delay = get_cw_delay();
 	if (cw_rx_pitch != decoder.signal.freq)
 		cw_rx_bin_init(&decoder.signal, cw_rx_pitch, N_BINS, SAMPLING_FREQ);
 
