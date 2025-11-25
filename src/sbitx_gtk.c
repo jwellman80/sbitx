@@ -50,6 +50,7 @@ The initial sync between the gui values, the core radio values, settings, et al 
 #include "ntputil.h"
 #include "para_eq.h"
 #include "eq_ui.h"
+#include "calibration_ui.h"
 #include <time.h>
 extern int get_rx_gain(void);
 extern int calculate_s_meter(struct rx *r, double rx_gain);
@@ -73,6 +74,7 @@ int vfo_lock_enabled = 0;
 int has_ina260 = 0;
 int zero_beat_enabled = 0;
 int tx_panafall_enabled = 0;
+int main_ui_encoders_enabled = 1;  // Flag to disable encoders when calibration dialog is open
 
 static float wf_min = 1.0f; // Default to 100%
 static float wf_max = 1.0f; // Default to 100%
@@ -514,7 +516,7 @@ struct apf apf1 = { .ison=0, .gain=0.0, .width=0.0 };
 // then convert back to linear for application
 int init_apf()  // define filter gain coefficients
 {
-	printf( " gain %.2f  width %.2f\n", apf1.gain, apf1.width );	
+//	printf( " init apf %d gain %.2f  width %.2f\n", apf1.ison, apf1.gain, apf1.width );	
 	double binw = 96000.0 / MAX_BINS;  // about 46.9
 	double  q = 2*apf1.width*apf1.width;
 
@@ -527,12 +529,12 @@ int init_apf()  // define filter gain coefficients
 	apf1.coeff[6]=apf1.coeff[2];
 	apf1.coeff[7]=apf1.coeff[1];
 	apf1.coeff[8]=apf1.coeff[0];
-	
+/*	
 	for (int i=0; i < 9; i++){
 				printf("%.3f ",apf1.coeff[i]);
 			}
 			printf(" \n");
-	 	
+*/	 	
 };
 
 
@@ -543,7 +545,7 @@ static struct field *f_last_text = NULL;
 
 // variables to power up and down the tx
 
-static int in_tx = TX_OFF;
+int in_tx = TX_OFF;
 static int key_down = 0;
 static int tx_start_time = 0;
 
@@ -628,6 +630,7 @@ int do_eqg(struct field *f, cairo_t *gfx, int event, int a, int b, int c);
 int do_eqb(struct field *f, cairo_t *gfx, int event, int a, int b, int c);
 int do_eq_edit(struct field *f, cairo_t *gfx, int event, int a, int b, int c);
 int do_notch_edit(struct field *f, cairo_t *gfx, int event, int a, int b, int c);
+int do_apf_edit(struct field *f, cairo_t *gfx, int event, int a, int b, int c);
 int do_comp_edit(struct field *f, cairo_t *gfx, int event, int a, int b, int c);
 int do_txmon_edit(struct field *f, cairo_t *gfx, int event, int a, int b, int c);
 int do_wf_edit(struct field *f, cairo_t *gfx, int event, int a, int b, int c);
@@ -681,7 +684,7 @@ struct field main_controls[] = {
 	 "", 0, 0, 0, COMMON_CONTROL},
 	{"#80m", NULL, 370, 5, 40, 40, "80M", 1, "", FIELD_BUTTON, FONT_FIELD_VALUE,
 	 "", 0, 0, 0, COMMON_CONTROL},
-	{"#record", do_record, 420, 5, 40, 40, "REC", 40, "OFF", FIELD_TOGGLE, FONT_FIELD_VALUE,
+	{"#record", do_record, 410, 5, 40, 40, "REC", 40, "OFF", FIELD_TOGGLE, FONT_FIELD_VALUE,
 	 "ON/OFF", 0, 0, 0, COMMON_CONTROL},
 	{"#tune", do_toggle_option, 460, 5, 40, 40, "TUNE", 40, "", FIELD_TOGGLE, FONT_FIELD_VALUE,
 	 "ON/OFF", 0, 0, 0, COMMON_CONTROL},
@@ -706,7 +709,7 @@ struct field main_controls[] = {
 	 "ON/OFF", 0, 0, 0, COMMON_CONTROL},
 	{"#vfo", NULL, 640, 50, 40, 40, "VFO", 1, "A", FIELD_SELECTION, FONT_FIELD_VALUE,
 	 "A/B", 0, 0, 0, COMMON_CONTROL},
-	{"#split", NULL, 680, 50, 40, 40, "SPLIT", 40, "OFF", FIELD_TOGGLE, FONT_FIELD_VALUE,
+	{"#split", NULL, 502, 50, 40, 40, "SPLIT", 40, "OFF", FIELD_TOGGLE, FONT_FIELD_VALUE,
 	 "ON/OFF", 0, 0, 0, COMMON_CONTROL},
 	{"#bw", do_bandwidth, 495, 5, 40, 40, "BW", 40, "", FIELD_NUMBER, FONT_FIELD_VALUE,
 	 "", 50, 5000, 50, COMMON_CONTROL},
@@ -857,6 +860,8 @@ struct field main_controls[] = {
 	 "", 0, 8, 1, 0},
 	{"#set", NULL, 1000, -1000, 40, 40, "SET", 1, "", FIELD_BUTTON, FONT_FIELD_VALUE,
 	 "", 0, 0, 0, 0, COMMON_CONTROL}, // w9jes
+	{"#cal", NULL, 1000, -1000, 40, 40, "CAL", 1, "", FIELD_BUTTON, FONT_FIELD_VALUE,
+	 "", 0, 0, 0, 0, COMMON_CONTROL},
 	{"#poff", NULL, 1000, -1000, 40, 40, "PWR-DWN", 1, "", FIELD_BUTTON, FONT_FIELD_VALUE,
 	 "", 0, 0, 0, 0, COMMON_CONTROL},
 	{"#fullscreen", do_toggle_option, 1000, -1000, 40, 40, "FULLSCREEN", 40, "OFF", FIELD_TOGGLE, FONT_FIELD_VALUE,
@@ -932,7 +937,7 @@ struct field main_controls[] = {
 	 "ON/OFF", 0, 0, 0, 0},
 
 	// Sub Menu Control 473,50 <- was
-	{"#menu", do_toggle_option, 462, 50, 40, 40, "MENU", 40, "OFF", 3, FONT_FIELD_VALUE,
+	{"#menu", do_toggle_option, 459, 50, 40, 40, "MENU", 40, "OFF", 3, FONT_FIELD_VALUE,
 	 "2/1/OFF", 0, 0, 0, COMMON_CONTROL},
 
 	// Notch Filter Controls
@@ -954,6 +959,14 @@ struct field main_controls[] = {
 	// ANR Control
 	{"#anr_plugin", do_toggle_option, 1000, -1000, 40, 40, "ANR", 40, "OFF", FIELD_TOGGLE, FONT_FIELD_VALUE,
 	 "ON/OFF", 0, 0, 0, 0},
+
+	// APF (Audio Peak Filter) Controls
+	{"#apf_plugin", do_toggle_option, 1000, -1000, 40, 40, "APF", 40, "OFF", FIELD_TOGGLE, FONT_FIELD_VALUE,
+	 "ON/OFF", 0, 0, 0, 0},
+	{"#apf_gain", do_apf_edit, 1000, -1000, 40, 40, "GAIN", 80, "6", FIELD_NUMBER, FONT_FIELD_VALUE,
+	 "", 0, 20, 1, 0},
+	{"#apf_width", do_apf_edit, 1000, -1000, 40, 40, "WIDTH", 80, "100", FIELD_NUMBER, FONT_FIELD_VALUE,
+	 "", 10, 500, 10, 0},
 
 	// Compressor Control
 	{"#comp_plugin", do_comp_edit, 1000, -1000, 40, 40, "COMP", 40, "0", FIELD_SELECTION, FONT_FIELD_VALUE,
@@ -3761,11 +3774,12 @@ void menu_display(int show) {
 				field_move("NOTCH", 185, screen_height - 80, 95, 37);
 				field_move("ANR", 285, screen_height - 80, 45, 37);
 				field_move("COMP", 350, screen_height - 80, 45, 37);
-				field_move("TXMON", 400, screen_height - 80, 45, 37);
-				field_move("TNDUR", 500, screen_height - 80, 45, 37);
+				field_move("TXMON", 410, screen_height - 80, 45, 37);
+				field_move("TNDUR", 470, screen_height - 80, 45, 37);
+				field_move("APF", 530, screen_height - 80, 95, 37);
 				if (!strcmp(field_str("EPTTOPT"), "ON"))
 				{
-					field_move("ePTT", screen_width - 190, screen_height - 80, 92, 37);
+					field_move("ePTT", screen_width - 160, screen_height - 80, 92, 37);
 				}
 
 				// Line 2
@@ -3775,8 +3789,10 @@ void menu_display(int show) {
 				field_move("BNDWTH", 235, screen_height - 40, 45, 37);
 				field_move("DSP", 285, screen_height - 40, 45, 37);
 				field_move("BFO", 350, screen_height - 40, 45, 37);
-				field_move("VFOLK", 400, screen_height - 40, 45, 37);
-				field_move("TNPWR", 500, screen_height - 40, 45, 37);
+				field_move("VFOLK", 410, screen_height - 40, 45, 37);
+				field_move("TNPWR", 470, screen_height - 40, 45, 37);
+				field_move("GAIN", 530, screen_height - 40, 45, 37);
+				field_move("WIDTH", 580, screen_height - 40, 45, 37);
 			}
 
 			else {
@@ -3886,12 +3902,12 @@ static void layout_ui()
   field_move("RIT", x2 - 292, 5, 40, 40);
   
   field_move("IF", x2 - 45, 50, 40, 40);
-  field_move("DRIVE", x2 - 85, 50, 40, 40);
-  field_move("BW", x2 - 125, 50, 40, 40);
-  field_move("AGC", x2 - 165, 50, 40, 40);
-  field_move("SPAN", x2 - 205, 50, 40, 40);
-  field_move("VFO", x2 - 245, 50, 40, 40);
-  field_move("SPLIT", x2 - 285, 50, 40, 40);
+  field_move("DRIVE", x2 - 87, 50, 42, 40);
+  field_move("BW", x2 - 127, 50, 40, 40);
+  field_move("AGC", x2 - 170, 50, 42, 40);
+  field_move("SPAN", x2 - 212, 50, 42, 40);
+  field_move("VFO", x2 - 252, 50, 40, 40);
+  field_move("SPLIT", x2 - 292, 50, 40, 40);
 
   // adjust screen height for keyboard
   if (!strcmp(field_str("KBD"), "ON")) {
@@ -5713,6 +5729,28 @@ int do_notch_edit(struct field *f, cairo_t *gfx, int event, int a, int b, int c)
 	return 0;
 }
 
+int do_apf_edit(struct field *f, cairo_t *gfx, int event, int a, int b, int c)
+{
+	if (!strcmp(field_str("APF"), "ON"))
+	{
+		struct field *apf_gain_field = get_field("#apf_gain");
+		int apf_gain_value = atoi(apf_gain_field->value);
+		apf1.gain = (float)apf_gain_value;
+		struct field *apf_width_field = get_field("#apf_width");
+		int apf_width_value = atoi(apf_width_field->value);
+		apf1.width = (float)apf_width_value;
+		apf1.ison = 1;
+		init_apf();
+
+	}
+	else
+	{
+		apf1.ison = 0;
+	}
+
+	return 0;
+}
+
 int do_comp_edit(struct field *f, cairo_t *gfx, int event, int a, int b, int c)
 {
 	const char *compression_control_field = field_str("COMP");
@@ -5912,6 +5950,7 @@ gboolean check_plugin_controls(gpointer data)
 	struct field *eq_stat = get_field("#eq_plugin");
 	struct field *rx_eq_stat = get_field("#rx_eq_plugin");
 	struct field *notch_stat = get_field("#notch_plugin");
+	struct field *apf_stat = get_field("#apf_plugin");
 	struct field *dsp_stat = get_field("#dsp_plugin");
 	struct field *anr_stat = get_field("#anr_plugin");
 	struct field *eptt_stat = get_field("#eptt");
@@ -5999,6 +6038,31 @@ gboolean check_plugin_controls(gpointer data)
 		else if (!strcmp(notch_stat->value, "OFF"))
 		{
 			notch_enabled = 0;
+		}
+	}
+
+	if (apf_stat)
+	{
+		if (!strcmp(apf_stat->value, "ON"))
+		{
+/*
+			printf(" apf_stat \n");
+			struct field *apf_gain_field = get_field("#apf_gain");
+			struct field *apf_width_field = get_field("#apf_width");
+			if ( ((abs(apf1.gain - (float)atoi(apf_gain_field->value))) > 1e-9) || // only if changed
+			     ((abs(apf1.width - (float)atoi(apf_width_field->value))) > 1.e-9) )
+			{
+				apf1.gain = (float)atoi(apf_gain_field->value);
+				apf1.width = (float)atoi(apf_width_field->value);
+				apf1.ison = 1;
+				init_apf();
+			}
+*/
+			apf1.ison = 1;
+		}
+		else if (!strcmp(apf_stat->value, "OFF"))
+		{
+			apf1.ison = 0;
 		}
 	}
 
@@ -6899,11 +6963,14 @@ int enc_read(struct encoder *e)
 static int tuning_ticks = 0;
 void tuning_isr(void)
 {
-	int tuning = enc_read(&enc_b);
-	if (tuning < 0)
-		tuning_ticks++;
-	if (tuning > 0)
-		tuning_ticks--;
+	if (main_ui_encoders_enabled)
+	{
+		int tuning = enc_read(&enc_b);
+		if (tuning < 0)
+			tuning_ticks++;
+		if (tuning > 0)
+			tuning_ticks--;
+	}
 }
         
 void query_swr()
@@ -7755,39 +7822,43 @@ gboolean ui_tick(gpointer gook)
 			tx_off();
 	}
 
-	int scroll = enc_read(&enc_a);
-	if (scroll)
+	if (main_ui_encoders_enabled)
 	{
-		// Update the last activity timestamp
-		mfk_last_ms = sbitx_millis();
-		
-		if (mfk_locked_to_volume)
+		int scroll = enc_read(&enc_a);
+		if (scroll)
 		{
-			// MFK is locked to volume control
-			mfk_adjust_volume(scroll);
-		}
-		else if (f_focus)
-		{
-			// Normal MFK behavior - control focused field
-			if (scroll < 0)
-				edit_field(f_focus, MIN_KEY_DOWN);
-			else
-				edit_field(f_focus, MIN_KEY_UP);
+			// Update the last activity timestamp
+			mfk_last_ms = sbitx_millis();
+
+			if (mfk_locked_to_volume)
+			{
+				// MFK is locked to volume control
+				mfk_adjust_volume(scroll);
+			}
+			else if (f_focus)
+			{
+				// Normal MFK behavior - control focused field
+				if (scroll < 0)
+					edit_field(f_focus, MIN_KEY_DOWN);
+				else
+					edit_field(f_focus, MIN_KEY_UP);
+			}
 		}
 	}
 	else
 	{
 		// Check if we should lock to volume due to timeout
-    if (!mfk_locked_to_volume && (sbitx_millis() - mfk_last_ms) > mfk_timeout_ms) {
-      // lock MFK to volume after inactivity AND move UI focus to the volume control
-      mfk_locked_to_volume = 1;
-      struct field *vol_field = get_field("r1:volume");
-      // now simulate the “knob press” focus change so the green highlight updates
-      if (vol_field) {
-        focus_field(vol_field);
-      }
-    }
+		if (!mfk_locked_to_volume && (sbitx_millis() - mfk_last_ms) > mfk_timeout_ms) {
+			// lock MFK to volume after inactivity AND move UI focus to the volume control
+			mfk_locked_to_volume = 1;
+			struct field *vol_field = get_field("r1:volume");
+			// now simulate the “knob press” focus change so the green highlight updates
+			if (vol_field) {
+				focus_field(vol_field);
+			}
+		}
 	}
+	
 	
 	// Check ENC1_SW for unlock (edge detection)
 	int enc1_sw_now = digitalRead(ENC1_SW);
@@ -8213,6 +8284,10 @@ void do_control_action(char *cmd)
 	else if (!strcmp(request, "SET"))
 	{
 		settings_ui(window);
+	}
+	else if (!strcmp(request, "CAL"))
+	{
+		calibration_ui(window);
 	}
 	else if (!strcmp(request, "PWR-DWN"))
 	{
@@ -8894,38 +8969,6 @@ void cmd_exec(char *cmd)
 			}
 		}
 	}
-
-else if (!strcasecmp(exec, "apf"))  // read command, load params in struct
-	{
-			char output[50];
-			char *token;
-		float temp;
-		token = strtok(args," ,");
-		if (token == NULL) {   // apf alone turns off
-			apf1.ison=0;
-			sprintf(output,"apf off\n");				
-		} else {              // token != NULL
-			 if ( (temp = atof(token)) > 0.0) {
-				 apf1.gain = temp;
-				 token = strtok(NULL," ,");
-				 if ((token != NULL) && ((temp = atof(token)) > 0.0)) {
-					apf1.width = temp;
-					apf1.ison=1;
-					sprintf(output,"apf gain %.2f width %.2f\n", apf1.gain, apf1.width);
-					init_apf();
-					} else 
-						sprintf(output,"usage: apf (gain dB) (width parameter)\n");								
-				} else  
-					sprintf(output,"usage: apf (gain dB) (width parameter)\n");			
-		}			
-		write_console(FONT_LOG, output);						
-	}
-	/*	else if (!strcasecmp(exec, "PITCH")){
-			struct field *f = get_field_by_label(exec);
-			field_set("PITCH", args);
-			focus_field(f);
-		}
-	*/
 
 	else if ((exec[0] == 'F' || exec[0] == 'f') && isdigit(exec[1]))
 	{
