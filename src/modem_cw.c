@@ -25,6 +25,7 @@
 #define MAX_SYMBOLS 100
 #define CW_MAX_SYMBOLS 12
 #define FLOAT_SCALE (1073741824.0)  // 2^30
+#define INV_FLOAT_SCALE (1.0/1073741824.0)  // Pre-compute inverse for faster multiplication
 #define HIGH_DECAY 50    // controls max high_level adjustment
 #define NOISE_DECAY 100  // controls max noise_level adjustment
 
@@ -433,7 +434,7 @@ float cw_tx_get_sample() {
       cw_envelope = 0.0f;
     keyup_count--;
   }
-  sample = ((vfo_read(&cw_tone) / FLOAT_SCALE) * cw_envelope) / 8;
+  sample = ((vfo_read(&cw_tone) * INV_FLOAT_SCALE) * cw_envelope) * 0.125;  // Optimized: multiply instead of divide
   
   // keep extending 'cw_tx_until' while we're sending
   if ((symbol_now == CW_DOWN) || (symbol_now == CW_DOT) ||
