@@ -196,6 +196,16 @@ extern int text_ready;  // flag that TEXT buffer in gui is ready to send
 static int cw_envelope_pos = 0; // position within the envelope
 static int cw_envelope_len = 480; // length of the envelope
 
+// Performance optimizations - moved out of real-time sample generation
+#define CW_CONSOLE_QUEUE_SIZE 256
+static char cw_console_queue[CW_CONSOLE_QUEUE_SIZE];
+static volatile int cw_console_queue_head = 0;
+static volatile int cw_console_queue_tail = 0;
+static char last_queued_char = '\0';
+
+static int cached_pitch = 700;  // Cache to avoid 96k get_pitch() calls/sec
+static int cached_cw_delay = 100;  // Cache to avoid repeated get_cw_delay() calls
+
 // Blackman-Harris cw envelope
 // data values were calculated in external spreadsheet
 static const float cw_envelope_data[480] = {
@@ -369,8 +379,16 @@ static int cw_read_key(){
     symbol_next = morse_lut[uc];
 
     if (symbol_next) {
-        char buff[2] = { (char)toupper(uc), 0 };  // safe ctype: uc is unsigned char
-        write_console(STYLE_CW_TX, buff);
+        // Queue character for console - moved out of real-time path for performance
+        char display_char = (char)toupper(uc);
+        if (display_char != last_queued_char) {
+            int next_head = (cw_console_queue_head + 1) % CW_CONSOLE_QUEUE_SIZE;
+            if (next_head != cw_console_queue_tail) {
+                cw_console_queue[cw_console_queue_head] = display_char;
+                cw_console_queue_head = next_head;
+                last_queued_char = display_char;
+            }
+        }
         return cw_get_next_symbol();
     } else {
         // unknown character: ignore
@@ -392,8 +410,8 @@ float cw_tx_get_sample() {
     // note current time to use with UI value of CW_DELAY to control break-in
     millis_now = millis();
     // set CW pitch if needed
-    if (cw_tone.freq_hz != get_pitch())
-      vfo_start( &cw_tone, get_pitch(), 0);
+    if (cached_pitch != -1 && cw_tone.freq_hz != cached_pitch)
+      vfo_start(&cw_tone, cached_pitch, 0);
   }
   
   // check to see if input available from macro or keyboard
@@ -440,7 +458,7 @@ float cw_tx_get_sample() {
   if ((symbol_now == CW_DOWN) || (symbol_now == CW_DOT) ||
       (symbol_now == CW_DASH) || (symbol_now == CW_SQUEEZE) ||
       (keydown_count > 0))
-    cw_tx_until = millis_now + get_cw_delay();
+    cw_tx_until = millis_now + cached_cw_delay;
   // if macro or keyboard characters remain in the buffer
   // prevent switching from xmit to rcv and cutting off macro
   if (cw_bytes_available != 0)
@@ -1042,13 +1060,28 @@ void cw_init() {
 }
 
 void cw_poll(int bytes_available, int tx_is_on){
+	// Flush console queue (moved out of real-time sample generation)
+	while (cw_console_queue_tail != cw_console_queue_head) {
+		char buff[2];
+		buff[0] = cw_console_queue[cw_console_queue_tail];
+		buff[1] = 0;
+		write_console(STYLE_CW_TX, buff);
+		cw_console_queue_tail = (cw_console_queue_tail + 1) % CW_CONSOLE_QUEUE_SIZE;
+	}
+	// Reset duplicate tracker after queue is empty
+	if (cw_console_queue_tail == cw_console_queue_head) {
+		last_queued_char = '\0';
+	}
+
 	cw_bytes_available = bytes_available;
 	cw_key_state = key_poll();
 	int wpm  = field_int("WPM");
 	cw_period = (12 * 9600)/wpm;
 
-	//retune the rx pitch if needed
+	//retune the rx pitch if needed and update cached TX pitch
   int cw_rx_pitch = field_int("PITCH");
+	cached_pitch = cw_rx_pitch;  // Update cache to avoid 96k calls/sec in sample generation
+	cached_cw_delay = get_cw_delay();  // Update CW delay cache
 	if (cw_rx_pitch != decoder.signal_center.freq) {
     cw_rx_bin_init(&decoder.signal_minus2, cw_rx_pitch - 80.0f,  N_BINS, SAMPLING_FREQ);
     cw_rx_bin_init(&decoder.signal_minus1, cw_rx_pitch - 35.0f,  N_BINS, SAMPLING_FREQ);
@@ -1064,11 +1097,11 @@ void cw_poll(int bytes_available, int tx_is_on){
 
 	// TX ON if bytes are avaiable (from macro/keyboard) or key is pressed
 	// of we are in the middle of symbol (dah/dit) transmission 
-	if (!tx_is_on && ((cw_bytes_available > 0 && text_ready == 1) || 
+	if (!tx_is_on && ((cw_bytes_available > 0 && text_ready == 1) ||
       cw_key_state || (symbol_next && *symbol_next)) > 0) {
 		tx_on(TX_SOFT);
 		millis_now = millis();
-		cw_tx_until = get_cw_delay() + millis_now;
+		cw_tx_until = cached_cw_delay + millis_now;
 		cw_mode = get_cw_input_method();
 	}
 	else if (tx_is_on && cw_tx_until < millis_now){
