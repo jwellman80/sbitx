@@ -7606,7 +7606,7 @@ void zbitx_poll(int all){
 		if(!strncmp(buff, "FT8 ", 4)){
 			char ft8_message[100];
 			hd_strip_decoration(ft8_message, buff + 4);
-			ft8_process(ft8_message, FT8_START_QSO);
+			//ft8_process(ft8_message, FT8_START_QSO);
 			printf("FT8 processing from zbitx\n");
 		}
 		else{
