@@ -7537,18 +7537,16 @@ static void zbitx_logs(){
 
 void zbitx_poll(int all){
 	char buff[3000];
-	static unsigned int last_update = 0;
 
 	int count = 0;
 	int e = 0;
 	int retry;
-	unsigned int this_time = millis();
 
 	for (int i = 0; active_layout[i].cmd[0] > 0; i++){
 		struct field *f = active_layout+i;
 		if (!strcmp(f->label, "WATERFALL") || !strcmp(f->label, "SPECTRUM"))
 			continue;
-		if (all || f->updated_at >  last_update){
+		if (all || f->update_remote){
 			sprintf(buff, "%s %s}", f->label, f->value);
 			retry = 3;
 			do {
@@ -7566,8 +7564,7 @@ void zbitx_poll(int all){
 			delay(10);
 		}
 	}
-	last_update = this_time;
-	
+
 	//check if the console q has any new updates
 	while (q_length(&q_zbitx_console) > 0){
 		char remote_cmd[1000];
@@ -7586,15 +7583,9 @@ void zbitx_poll(int all){
 
 	zbitx_get_spectrum(buff);
 	strcat(buff, "}"); //terminate the block
-	//spectrum can be lost mometarily, it is alright	
+	//spectrum can be lost mometarily, it is alright
 	delay(1);
 	i2cbb_write_i2c_block_data(0x0a, '{', strlen(buff), buff);
-
-	//transmit in_tx
-	sprintf(buff, "IN_TX %d}", in_tx);
-	delay(1);
-	i2cbb_write_i2c_block_data(0x0a, '{', strlen(buff), buff);
-
 
 	if(update_logs){
 		zbitx_logs();
