@@ -7630,7 +7630,6 @@ void zbitx_poll(int all){
 	// 		remote_execute(buff);
 	// 	}
 	// }
-	last_update = this_time;
 }
 
 void zbitx_init(){
