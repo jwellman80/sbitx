@@ -7869,39 +7869,17 @@ gboolean ui_tick(gpointer gook)
 	{
 	case MODE_CW:
 	case MODE_CWR:
-		tick_count = wf_spd; // Use wf_spd for CW and CWR modes
+		tick_count = 50;
 		break;
-
 	case MODE_FT4:
 	case MODE_FT8:
-		if (wf_spd < 50)
-		{
-			tick_count = 50; // Ensure tick_count is at least 50 if wf_spd is too low
-		}
-		else
-		{
-			tick_count = wf_spd; // Use wf_spd as tick_count otherwise
-		}
+		tick_count = 200;
 		break;
-
-	case MODE_AM:
-		tick_count = wf_spd; // Use wf_spd for AM mode
-		break;
-
 	default:
-		tick_count = wf_spd; // Default to wf_spd
+		tick_count = 100;
 		break;
 	}
 
-	// Ensure tick_count is within reasonable bounds
-	if (tick_count < 1)
-	{
-		tick_count = 1; // Minimum tick_count to avoid division by zero or overly frequent updates
-	}
-	else if (tick_count > 500)
-	{
-		tick_count = 500; // Arbitrary maximum to prevent too infrequent updates
-	}
 	if (ticks >= tick_count)
 	{
 
