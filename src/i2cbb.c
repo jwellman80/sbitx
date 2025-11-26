@@ -34,8 +34,8 @@ void i2cbb_init(uint8_t pin_number_sda, uint8_t pin_number_scl)
 	PIN_SCL = pin_number_scl;
 	sleepTimeNanos = 0;
 	nanoSleepTime.tv_sec = 0;
-	nanoSleepTime.tv_nsec = 0;	
-	delayTicks = 400;       // Delay value empirically chosen to be twice the value that just start to cause I2C NACKs - N3SB 
+	nanoSleepTime.tv_nsec = 0;
+	delayTicks = 800;       // Increased from 400 to be more robust to audio thread interruptions 
 //	printf("I2BB delayTicks set to %d instead of 400\n", delayTicks);
 	i2c_started = 0;
   // Pull up setzen 50KΩ
