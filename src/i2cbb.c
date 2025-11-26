@@ -172,8 +172,7 @@ static int i2c_read_bit() {
     int bit;
     // Let the slave drive data
     read_SDA();
-    i2c_delay();
-		
+    i2c_delay();	
     while (read_SCL() == 0) { // Clock stretching
       // You should add timeout to this loop
         i2c_sleep();
@@ -192,11 +191,6 @@ static int i2c_read_bit() {
 static int i2c_write_byte(int send_start, int send_stop, uint8_t byte) {
     unsigned bit;
     int nack = 0;
-
-		static int mutex = 0;
-		if (mutex)
-			printf("double!\n");
-		mutex++;
     if (send_start) {
         i2c_start_cond();
     }
@@ -208,7 +202,6 @@ static int i2c_write_byte(int send_start, int send_stop, uint8_t byte) {
     if (send_stop) {
         i2c_stop_cond();
     }
-		mutex--;
     return nack;
 }
 

@@ -7601,27 +7601,44 @@ void zbitx_poll(int all){
 		update_logs = 0;
 	}
 
-	int  reply_length;
 
-	if ((reply_length = i2cbb_read_rll(0xa, buff)) != -1){
-	//zero terminate the reply
-		buff[reply_length] = 0;
-
+	if(i2cbb_read_i2c_block_data(0xa, 0, 100, buff) != -1){
 		if(!strncmp(buff, "FT8 ", 4)){
 			char ft8_message[100];
-			hd_strip_decoration(ft8_message, buff);
-			//ft8_process(ft8_message, FT8_START_QSO);
-			remote_execute(ft8_message);
+			hd_strip_decoration(ft8_message, buff + 4);
+			ft8_process(ft8_message, FT8_START_QSO);
 			printf("FT8 processing from zbitx\n");
 		}
 		else{
-			if (!strncmp(buff, "OPEN", 4)){
+			if (!strncmp(buff, "OPEN", 4))
 				update_logs = 1;
-				printf("<<<< refresh the log >>>>>\n");
-			}
+			if (isupper(buff[0]))
+				printf("remote exec: %s\n", buff);
 			remote_execute(buff);
 		}
 	}
+
+	// int  reply_length;
+
+	// if ((reply_length = i2cbb_read_rll(0xa, buff)) != -1){
+	// //zero terminate the reply
+	// 	buff[reply_length] = 0;
+
+	// 	if(!strncmp(buff, "FT8 ", 4)){
+	// 		char ft8_message[100];
+	// 		hd_strip_decoration(ft8_message, buff);
+	// 		//ft8_process(ft8_message, FT8_START_QSO);
+	// 		remote_execute(ft8_message);
+	// 		printf("FT8 processing from zbitx\n");
+	// 	}
+	// 	else{
+	// 		if (!strncmp(buff, "OPEN", 4)){
+	// 			update_logs = 1;
+	// 			printf("<<<< refresh the log >>>>>\n");
+	// 		}
+	// 		remote_execute(buff);
+	// 	}
+	// }
 	last_update = this_time;
 }
 

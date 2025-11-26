@@ -2390,10 +2390,12 @@ void setup()
 	pinMode(LPF_B, OUTPUT);
 	pinMode(LPF_C, OUTPUT);
 	pinMode(LPF_D, OUTPUT);
+	pinMode(LPF_E, OUTPUT);
 	digitalWrite(LPF_A, LOW);
 	digitalWrite(LPF_B, LOW);
 	digitalWrite(LPF_C, LOW);
 	digitalWrite(LPF_D, LOW);
+	digitalWrite(LPF_E, LOW);
 
 	// ADDED BY KF7YDU - initialize ext_ptt to low at startup
 	digitalWrite(EXT_PTT, LOW);
