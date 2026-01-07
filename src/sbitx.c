@@ -23,6 +23,7 @@
 #include "si5351.h"
 #include "ini.h"
 #include "para_eq.h"
+#include "swr_monitor.h"
 
 #define DEBUG 0
 
@@ -2103,7 +2104,7 @@ static void read_hw_ini()
 */
 void set_tx_power_levels()
 {
-	 printf("Setting tx_power drive to %d\n", tx_drive);
+	 //~ printf("Setting tx_power drive to %d\n", tx_drive);
 	// int tx_power_gain = 0;
 
 	// search for power in the approved bands
@@ -2435,7 +2436,7 @@ void setup()
 
     printf("hw version: %d\n", sbitx_version);
 	setup_audio_codec();
-	sound_thread_start("plughw:0,0");
+	sound_thread_start("plughw:CARD=audioinjectorpi,DEV=0");
 
 	sleep(1); // why? to allow the aloop to initialize?
 
@@ -2688,3 +2689,4 @@ void sdr_request(char *request, char *response)
 	/* else
 		  printf("*Error request[%s] not accepted\n", request); */
 }
+
