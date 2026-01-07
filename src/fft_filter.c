@@ -101,7 +101,7 @@ int window_filter(int const L,int const M,complex float * const response,float c
   int e = fftwf_import_wisdom_from_filename(wisdom_file_f);
   if (e == 0)
   {
-    printf("Generating Wisdom File...\n");
+    printf("Generating Wisdom File - window_filter... %s\n", wisdom_file_f);
   }
   fftwf_plan fwd_filter_plan = fftwf_plan_dft_1d(N,buffer,buffer,FFTW_FORWARD, WISDOM_MODE); // Was FFTW_ESTIMATE N3SB
   fftwf_plan rev_filter_plan = fftwf_plan_dft_1d(N,buffer,buffer,FFTW_BACKWARD, WISDOM_MODE); // Was FFTW_ESTIMATE N3SB
@@ -141,6 +141,7 @@ int window_filter(int const L,int const M,complex float * const response,float c
   // apply window and gain
   for(int n = M - 1; n >= 0; n--)
     buffer[n] = buffer[n] * kaiser_window[n] * gain;
+    
 #if 0
   printf("#Filter time impulse response, windowed and gain adjusted\n");
   for(int n=0;n< N;n++)

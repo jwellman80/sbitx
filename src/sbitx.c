@@ -74,7 +74,7 @@ void tr_switch(int tx_on);
 // if the Wisdom plans in the file were generated at the same or more rigorous level.
 #define WISDOM_MODE FFTW_MEASURE
 #define PLANTIME -1 // spend no more than plantime seconds finding the best FFT algorithm. -1 turns the platime cap off.
-char wisdom_file[] = "sbitx_wisdom.wis";
+char wisdom_file[] = "/home/pi/sbitx/data/sbitx_wisdom.wis";
 
 #define NOISE_ALPHA 0.9	   // Smoothing factor for DSP noise estimation 0.0->1.0 >responsive/>stable -> >responsive/>stable
 #define SIGNAL_ALPHA 0.90  // Smoothing factor for DSP observed power spectrum estimation 0.9->0.99 >responsive/>stable -> >responsive/>stable
@@ -245,7 +245,7 @@ void fft_init()
 	int e = fftw_import_wisdom_from_filename(wisdom_file);
 	if (e == 0)
 	{
-		printf("Generating Wisdom File...\n");
+		printf("Generating Wisdom File - fft_init...%s\n", wisdom_file);
 	}
 	plan_fwd = fftw_plan_dft_1d(MAX_BINS, fft_in, fft_out, FFTW_FORWARD, WISDOM_MODE);			 // Was FFTW_ESTIMATE N3SB
 	plan_spectrum = fftw_plan_dft_1d(MAX_BINS, fft_in, fft_spectrum, FFTW_FORWARD, WISDOM_MODE); // Was FFTW_ESTIMATE N3SB
@@ -754,7 +754,7 @@ struct rx *add_tx(int frequency, short mode, int bpf_low, int bpf_high)
 	int e = fftw_import_wisdom_from_filename(wisdom_file);
 	if (e == 0)
 	{
-		printf("Generating Wisdom File...\n");
+		printf("Generating Wisdom File - add_tx...%s\n", wisdom_file);
 	}
 	r->plan_rev = fftw_plan_dft_1d(MAX_BINS, r->fft_freq, r->fft_time, FFTW_BACKWARD, WISDOM_MODE); // Was FFTW_ESTIMATE N3SB
 	fftw_export_wisdom_to_filename(wisdom_file);
@@ -805,7 +805,7 @@ struct rx *add_rx(int frequency, short mode, int bpf_low, int bpf_high)
 	int e = fftw_import_wisdom_from_filename(wisdom_file);
 	if (e == 0)
 	{
-		printf("Generating Wisdom File...\n");
+		printf("Generating Wisdom File - add_rx...%s\n", wisdom_file);
 	}
 	r->plan_rev = fftw_plan_dft_1d(MAX_BINS, r->fft_freq, r->fft_time, FFTW_BACKWARD, WISDOM_MODE); // Was FFTW_ESTIMATE N3SB
 	fftw_export_wisdom_to_filename(wisdom_file);
@@ -1549,9 +1549,9 @@ void read_power()
 
 	memcpy(&vfwd, response, 2);
 	memcpy(&vref, response + 2, 2);
-	//	printf("%d:%d\n", vfwd, vref);
+	printf("%d:%d\n", vfwd, vref);
 
-        if (vref >= vfwd)
+    if (vref >= vfwd)
 		vswr = 100;
 	else
 		vswr = (10 * (vfwd + vref)) / (vfwd - vref);
@@ -1559,9 +1559,12 @@ void read_power()
 	// here '400' is the scaling factor as our ref power output is 40 watts
 	// this calculates the power as 1/10th of a watt, 400 = 40 watts
 	int fwdvoltage = (vfwd * 40) / bridge_compensation;
+	fwdpower = (fwdvoltage * fwdvoltage)/400;
 
+	
 	// Implement a simple "hold" algorithm in order to show
 	// readable and meaningful power readings that should be the pep power
+	/*
 	fwdpw = (fwdvoltage * fwdvoltage) / 400;
 	if (fwdpw > fwdpower_calc) {
 		fwdpower_calc = fwdpw;
@@ -1573,19 +1576,16 @@ void read_power()
 	if (!fwdpower)
 		fwdpower = fwdpw;
 	fwdpower_cnt = ++fwdpower_cnt % 100;
-
+*/
+	
 	int rf_v_p2p = (fwdvoltage * 126) / 400;
-	//	printf("rf volts: %d, alc %g, %d watts ", rf_v_p2p, alc_level, fwdpower/10);
+	printf("rf volts: %d, alc %g, %d watts ", rf_v_p2p, alc_level, fwdpower/10);
 	if (rf_v_p2p > 135 && !in_calibration)
 	{
 		alc_level *= 135.0 / (1.0 * rf_v_p2p);
 		printf("ALC tripped, to %d percent\n", (int)(100 * alc_level));
 	}
-	/*	else if (alc_level < 0.95){
-			printf("alc releasing to ");
-			alc_level *= 1.02;
-		}
-	*/
+
 	//	printf("alc: %g\n", alc_level);
 }
 
