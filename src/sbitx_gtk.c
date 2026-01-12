@@ -150,6 +150,8 @@ float voltage = 0.0f, current = 0.0f;
 static int mouse_down = 0;
 static int last_mouse_x = -1;
 static int last_mouse_y = -1;
+static int mouse_press_x = -1;
+static int mouse_press_y = -1;
 
 // MFK timeout state
 static int mfk_locked_to_volume = 0;
@@ -5121,6 +5123,54 @@ void abort_tx()
 	tx_off();
 }
 
+// Helper function to handle click on spectrum/waterfall to set TX_PITCH
+// Returns 1 if TX_PITCH was set, 0 otherwise
+static int handle_tx_pitch_click(struct field *f, int a, int b)
+{
+	// Check if we have a valid press position
+	if (mouse_press_x < 0)
+		return 0;
+
+	// Check if this was a click (minimal movement)
+	int dx = abs(a - mouse_press_x);
+	int dy = abs(b - mouse_press_y);
+
+	// Reset press tracking
+	mouse_press_x = -1;
+	mouse_press_y = -1;
+
+	// If too much movement, this was a drag not a click
+	if (dx >= 5 || dy >= 5)
+		return 0;
+
+	// Check if we're in FT4/FT8 mode
+	struct field *mode_f = get_field("r1:mode");
+	if (!mode_f || strncmp(mode_f->value, "FT", 2))
+		return 0;
+
+	// Get span for calculation
+	struct field *f_span = get_field("#span");
+	int span = atof(f_span->value) * 1000.0; // Convert kHz to Hz
+
+	// Calculate TX_PITCH from click position
+	// Inverse of: tx_pitch_x = f->x + (f->width/2) + ((f->width * tx_pitch) / span)
+	int new_tx_pitch = (int)(((a - f->x - f->width / 2.0) * span) / f->width);
+
+	// Round to nearest 10 Hz
+	new_tx_pitch = ((new_tx_pitch + 5) / 10) * 10;
+
+	// Clamp to valid range (300 to 3000 Hz)
+	if (new_tx_pitch < 300)
+		new_tx_pitch = 300;
+	if (new_tx_pitch > 3000)
+		new_tx_pitch = 3000;
+
+	// Set the TX_PITCH field
+	set_field_int("#tx_pitch", new_tx_pitch);
+
+	return 1;
+}
+
 int do_spectrum(struct field *f, cairo_t *gfx, int event, int a, int b, int c)
 {
 	struct field *f_freq, *f_span, *f_pitch;
@@ -5167,7 +5217,12 @@ int do_spectrum(struct field *f, cairo_t *gfx, int event, int a, int b, int c)
 		return 1;
 		break;
 	case GDK_BUTTON_PRESS:
-		if (c == GDK_BUTTON_SECONDARY)
+		if (c == GDK_BUTTON_PRIMARY)
+		{ // left click - store press position for potential TX_PITCH update
+			mouse_press_x = a;
+			mouse_press_y = b;
+		}
+		else if (c == GDK_BUTTON_SECONDARY)
 		{ // right click QSY
 			f_freq = get_field("r1:freq");
 			freq = atoi(f_freq->value);
@@ -5190,6 +5245,14 @@ int do_spectrum(struct field *f, cairo_t *gfx, int event, int a, int b, int c)
 			sprintf(buff, "%ld", freq);
 			set_field("r1:freq", buff);
 			return 1;
+		}
+		break;
+	case GDK_BUTTON_RELEASE:
+		if (c == GDK_BUTTON_PRIMARY)
+		{
+			// Try to set TX_PITCH from click position (FT4/FT8 modes only)
+			if (handle_tx_pitch_click(f, a, b))
+				return 1;
 		}
 		break;
 	}
@@ -5236,6 +5299,21 @@ int do_waterfall(struct field *f, cairo_t *gfx, int event, int a, int b, int c)
 					return 1;
 				break;
 		*/
+	case GDK_BUTTON_PRESS:
+		if (c == GDK_BUTTON_PRIMARY)
+		{ // left click - store press position for potential TX_PITCH update
+			mouse_press_x = a;
+			mouse_press_y = b;
+		}
+		break;
+	case GDK_BUTTON_RELEASE:
+		if (c == GDK_BUTTON_PRIMARY)
+		{
+			// Try to set TX_PITCH from click position (FT4/FT8 modes only)
+			if (handle_tx_pitch_click(f, a, b))
+				return 1;
+		}
+		break;
 	}
 	return 0;
 }
@@ -8103,7 +8181,7 @@ static gboolean on_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer dat
 	if (hoverField)
 	{
 		const bool reverse = !strcmp(get_field("reverse_scrolling")->value, "ON");
-		printf("scroll @%lf, %lf; direction %d reverse? %d field %s type %s\n", event->x, event->y, event->direction, reverse, hoverField->label, hoverField->value_type);
+		//printf("scroll @%lf, %lf; direction %d reverse? %d field %s type %s\n", event->x, event->y, event->direction, reverse, hoverField->label, hoverField->value_type);
 		if (event->direction == 0)
 		{
 			if (reverse)
@@ -8134,7 +8212,7 @@ static gboolean on_mouse_release(GtkWidget *widget, GdkEventButton *event, gpoin
 	{
 		if (f_focus->fn)
 			f_focus->fn(f_focus, NULL, GDK_BUTTON_RELEASE,
-						(int)(event->x), (int)(event->y), 0);
+						(int)(event->x), (int)(event->y), event->button);
 		// printf("mouse release at %d, %d\n", (int)(event->x), (int)(event->y));
 	}
 	/* We've handled the event, stop processing */
