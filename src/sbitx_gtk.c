@@ -94,6 +94,8 @@ static bool layout_needs_refresh = false;
 static int last_scope_size = -1; // Default to an invalid value initially
 float scope_alpha_plus = 0.0;	 // Default additional scope alpha
 
+int tune_key=0; // CW tuning
+
 #define AVERAGING_FRAMES 15 // Number of frames to average
 // Buffer to hold past spectrum data
 static int spectrum_history[AVERAGING_FRAMES][MAX_BINS] = {0};
@@ -2152,7 +2154,9 @@ void save_user_settings(int forced)
 	{
 		// Skip #band and #band_stack_pos - these are computed fields, not saved
 		// The band stack index is saved per-band in the [80M], [40M], etc. sections
-		if (!strcmp(active_layout[i].cmd, "#band") || !strcmp(active_layout[i].cmd, "#band_stack_pos"))
+		if (!strcmp(active_layout[i].cmd, "#band") || 
+			!strcmp(active_layout[i].cmd, "#band_stack_pos") ||
+			!strcmp(active_layout[i].cmd, "#ftx_auto"))
 			continue;
 		fprintf(f, "%s=%s\n", active_layout[i].cmd, active_layout[i].value);
 	}
@@ -2311,7 +2315,9 @@ static int user_settings_handler(void *user, const char *section,
 
 		// Skip #band and #band_stack_pos - these are computed fields from the old implementation
 		// They should not be loaded from settings
-		if (!strcmp(cmd, "#band") || !strcmp(cmd, "#band_stack_pos"))
+		if (!strcmp(cmd, "#band") || 
+			!strcmp(cmd, "#band_stack_pos") ||
+			!strcmp(cmd, "#ftx_auto"))  // ftx_auto needs to be reset to default on launch
 		{
 			return 1;
 		}
@@ -2704,8 +2710,8 @@ void draw_modulation(struct field *f, cairo_t *gfx)
 	for (i = 0; i < f->width; i++)
 	{
 		int index = (i * n_env_samples) / f->width;
-		int min = mod_display[index++];
-		int max = mod_display[index++];
+        int min = mod_display[index++ % MOD_MAX];
+        int max = mod_display[index++ % MOD_MAX];
 		cairo_move_to(gfx, f->x + i, min + h_center);
 		cairo_line_to(gfx, f->x + i, max + h_center + 1);
 	}
@@ -4438,7 +4444,7 @@ static void layout_ui()
       field_move("ESC", 675, y_bottom, 75, row_h);
     }
 
-    // Keep TUNE hidden
+    // TUNE control is offscreen in this mode
     field_move("TUNE", 1000, -1000, 40, 40);
     break;
 
@@ -4580,8 +4586,8 @@ static void layout_ui()
     field_move("F9", 600, y_bottom, 75, row_h);
     field_move("F10", 675, y_bottom, 70, row_h);
 
-    // TUNE control is offscreen in this mode
-    field_move("TUNE", 1000, -1000, 40, 40);
+    // TUNE control is on screen in this mode
+	field_move("TUNE", 460, 5, 40, 40);
     break;
 
   case MODE_USB:
@@ -8181,7 +8187,7 @@ static gboolean on_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer dat
 	if (hoverField)
 	{
 		const bool reverse = !strcmp(get_field("reverse_scrolling")->value, "ON");
-		//printf("scroll @%lf, %lf; direction %d reverse? %d field %s type %s\n", event->x, event->y, event->direction, reverse, hoverField->label, hoverField->value_type);
+		//printf("scroll @%lf, %lf; direction %d reverse? %d field %s\n", event->x, event->y, event->direction, reverse, hoverField->label);
 		if (event->direction == 0)
 		{
 			if (reverse)
@@ -8631,6 +8637,11 @@ int key_poll() {
   int key = CW_IDLE;
   int input_method = get_cw_input_method();
 
+  if (tune_key == 1) {  // fake key down for CW tune
+	   key = CW_DOWN;
+	   return key;
+   }
+   
   // Handle straight key input
   if (input_method == CW_STRAIGHT) {
     if ((digitalRead(PTT) == LOW) || (digitalRead(DASH) == LOW)) {
@@ -8807,6 +8818,9 @@ int get_cw_delay()
 
 int get_cw_input_method()
 {
+	if (tune_key == 1) {  // fake straight key down for CW tune
+		return CW_STRAIGHT;
+	}
 	struct field *f = get_field("#cwinput");
 	if (!strcmp(f->value, "KEYBOARD"))
 		return CW_KBD;
@@ -9992,11 +10006,16 @@ void do_control_action(char *cmd)
 		snprintf(tn_power_command, sizeof(tn_power_command), "tx_power=%d", tunepower); // Create TNPWR string
 		sdr_request(tn_power_command, response);										// Send TX with power level from tune power
 
-		sdr_request("r1:mode=TUNE", response);
+		if (mode_id(modestore) == MODE_CW || mode_id(modestore) == MODE_CWR) {
+			tune_key = 1;  // fake straight key down
+			delay(100);
+		} else {
+		sdr_request("r1:mode=TUNE", response);				
 		delay(100);
-		tx_on(TX_SOFT);
-	}
-	else if (!strcmp(request, "TUNE OFF"))
+		tx_on(TX_SOFT);	
+		}
+	}  // end tune on
+	 if (!strcmp(request, "TUNE OFF"))
 	{
 		if (tune_on_invoked)
 		{
@@ -10004,6 +10023,7 @@ void do_control_action(char *cmd)
 			tune_on_invoked = false; // Ensure this is reset immediately to prevent repeated execution
 			do_control_action("RX");
 			abort_tx(); // added to terminate tune duration - W9JES
+			tune_key=0; // for CW/CWR
 			field_set("MODE", modestore);
 			field_set("DRIVE", powerstore);
 		}
@@ -10020,6 +10040,7 @@ void do_control_action(char *cmd)
 			//  Perform TUNE OFF actions safely
 			do_control_action("RX");
 			field_set("TUNE", "OFF");
+			tune_key=0;  // for CW/CWR
 			// if (modestore != NULL) // Check for null before accessing or modifying
 			field_set("MODE", modestore);
 
