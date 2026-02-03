@@ -360,6 +360,7 @@ int is_fullscreen = 0;
 
 extern void settings_ui(GtkWidget *p);
 extern void eq_ui(GtkWidget *p);
+extern void udp_settings_ui(GtkWidget *p);
 void ftx_rules_ui(GtkWidget* p);
 
 // these are callbacks called by the operating system
@@ -10471,6 +10472,10 @@ void cmd_exec(char *cmd)
 		char *path = getenv("HOME");
 		sprintf(fullpath, "mousepad %s/sbitx/data/logbook.txt", path);
 		execute_app(fullpath);
+	}
+	else if (!strcasecmp(exec, "udpsettings"))
+	{
+		udp_settings_ui(window);
 	}
 	else if (!strcasecmp(exec, "clear"))
 	{
