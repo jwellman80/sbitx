@@ -5593,8 +5593,10 @@ void abort_tx()
 	tx_off();
 }
 
-// Helper function to handle click on spectrum/waterfall to set TX_PITCH
-// Returns 1 if TX_PITCH was set, 0 otherwise
+// Helper function to handle left-click on spectrum/waterfall.
+// For FT4/FT8: sets TX_PITCH to the clicked frequency offset.
+// For all other modes: QSYs to the clicked frequency.
+// Returns 1 if handled, 0 otherwise.
 static int handle_tx_pitch_click(struct field *f, int a, int b)
 {
 	// Check if we have a valid press position
@@ -5613,30 +5615,54 @@ static int handle_tx_pitch_click(struct field *f, int a, int b)
 	if (dx >= 5 || dy >= 5)
 		return 0;
 
-	// Check if we're in FT4/FT8 mode
 	struct field *mode_f = get_field("r1:mode");
-	if (!mode_f || strncmp(mode_f->value, "FT", 2))
+	if (!mode_f)
 		return 0;
 
 	// Get span for calculation
 	struct field *f_span = get_field("#span");
 	int span = atof(f_span->value) * 1000.0; // Convert kHz to Hz
 
-	// Calculate TX_PITCH from click position
-	// Inverse of: tx_pitch_x = f->x + (f->width/2) + ((f->width * tx_pitch) / span)
-	int new_tx_pitch = (int)(((a - f->x - f->width / 2.0) * span) / f->width);
+	if (!strncmp(mode_f->value, "FT", 2))
+	{
+		// FT4/FT8: set TX_PITCH to the clicked audio offset within the passband
+		// Inverse of: tx_pitch_x = f->x + (f->width/2) + ((f->width * tx_pitch) / span)
+		int new_tx_pitch = (int)(((a - f->x - f->width / 2.0) * span) / f->width);
 
-	// Round to nearest 10 Hz
-	new_tx_pitch = ((new_tx_pitch + 5) / 10) * 10;
+		// Round to nearest 10 Hz
+		new_tx_pitch = ((new_tx_pitch + 5) / 10) * 10;
 
-	// Clamp to valid range (300 to 3000 Hz)
-	if (new_tx_pitch < 300)
-		new_tx_pitch = 300;
-	if (new_tx_pitch > 3000)
-		new_tx_pitch = 3000;
+		// Clamp to valid range (300 to 3000 Hz)
+		if (new_tx_pitch < 300)
+			new_tx_pitch = 300;
+		if (new_tx_pitch > 3000)
+			new_tx_pitch = 3000;
 
-	// Set the TX_PITCH field
-	set_field_int("#tx_pitch", new_tx_pitch);
+		set_field_int("#tx_pitch", new_tx_pitch);
+	}
+	else
+	{
+		// All other modes: QSY to the clicked frequency
+		struct field *f_freq = get_field("r1:freq");
+		long freq = atol(f_freq->value);
+		int mode = mode_id(mode_f->value);
+		struct field *f_pitch = get_field("rx_pitch");
+		int pitch = atoi(f_pitch->value);
+
+		if (mode == MODE_CW)
+			freq += ((((float)(a - f->x) / (float)f->width) - 0.5) * (float)span) - pitch;
+		else if (mode == MODE_CWR)
+			freq += ((((float)(a - f->x) / (float)f->width) - 0.5) * (float)span) + pitch;
+		else
+			freq += (((float)(a - f->x) / (float)f->width) - 0.5) * (float)span;
+
+		// Snap to nearest 1 kHz
+		freq = ((freq + 500) / 1000) * 1000;
+
+		char buff[32];
+		sprintf(buff, "%ld", freq);
+		set_field("r1:freq", buff);
+	}
 
 	return 1;
 }
@@ -5720,7 +5746,7 @@ int do_spectrum(struct field *f, cairo_t *gfx, int event, int a, int b, int c)
 	case GDK_BUTTON_RELEASE:
 		if (c == GDK_BUTTON_PRIMARY)
 		{
-			// Try to set TX_PITCH from click position (FT4/FT8 modes only)
+			// Left click: set TX pitch (FT4/FT8) or QSY (all other modes)
 			if (handle_tx_pitch_click(f, a, b))
 				return 1;
 		}
@@ -5779,7 +5805,7 @@ int do_waterfall(struct field *f, cairo_t *gfx, int event, int a, int b, int c)
 	case GDK_BUTTON_RELEASE:
 		if (c == GDK_BUTTON_PRIMARY)
 		{
-			// Try to set TX_PITCH from click position (FT4/FT8 modes only)
+			// Left click: set TX pitch (FT4/FT8) or QSY (all other modes)
 			if (handle_tx_pitch_click(f, a, b))
 				return 1;
 		}
