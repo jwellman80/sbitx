@@ -17,7 +17,7 @@ We have an incredible development team collaborating on improvements for the sBi
 A huge thank you to everyone who contributes their time and expertise to this project!
 
 ## Release Notes
-[Available Here](https://github.com/drexjj/sbitx/blob/release_notes.md)
+[Available Here](https://github.com/drexjj/sbitx/blob/main/release_notes.md)
 
 
 ## 📂 File Compatibility
@@ -25,7 +25,6 @@ A huge thank you to everyone who contributes their time and expertise to this pr
 The files here are designed to work on the modified, 64-bit version provided in the [Releases](https://github.com/drexjj/sbitx/releases) section.
 
 - **sBitx Toolbox for 64-bit**: [Available Here](https://github.com/drexjj/sBITX-toolbox64)
-- **sBitx Toolbox for 32-bit (Factory HF Signals Version)**: [Available Here](https://github.com/drexjj/sBITX-toolbox)
 
 ## 🔴 Backup Your Data First!
 

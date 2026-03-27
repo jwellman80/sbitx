@@ -45,8 +45,7 @@ int logbook_has_power_swr_xota() {
 	static int ret = -1;
 	if (ret < 0) {
 		sqlite3_stmt *stmt;
-		if (db == NULL)
-			logbook_open();
+		logbook_open();
 		// https://stackoverflow.com/a/30348775
 		// it might be called sqlite_schema in newer versions
 		sqlite3_prepare_v2(db, "select sql from sqlite_master where name='logbook';", -1, &stmt, NULL);
@@ -60,17 +59,21 @@ int logbook_has_power_swr_xota() {
 	return ret;
 }
 
-/* writes the output to /tmp/sbitx_result_rows.txt
-	if the from_id is negative, it returns the later 50 records (higher id)
-	if the from_id is positive, it returns the prior 50 records (lower id) */
-
-int logbook_query(char* query, int from_id, char* result_file)
+/*!
+	Writes the output into a temporary file and copies the file path into
+	\a result_file, a string with length \a result_file_len.
+	(Currently the file path is always /tmp/sbitx_result_rows.txt, but don't count on it.)
+	The file format is strings separated by `|` characters (psv, pipe-separated values).
+	- If \a from_id is negative: writes the next 50 records with a higher id than that
+	- If \a from_id is positive: writes 50 records prior to it (those with a lower id)
+	- If \a from_id is \c 0: writes the most-recent 50 records
+*/
+int logbook_query(char* query, int from_id, char* result_file, int result_file_len)
 {
 	sqlite3_stmt* stmt;
 	char statement[200], param[2000];
 
-	if (db == NULL)
-		logbook_open();
+	logbook_open();
 
 	// add to the bottom of the logbook
 	if (from_id > 0) {
@@ -105,7 +108,7 @@ int logbook_query(char* query, int from_id, char* result_file)
 	sqlite3_prepare_v2(db, statement, -1, &stmt, NULL);
 
  	const char *output_path = "/tmp/sbitx_result_rows.txt";
-	strncpy(result_file, output_path, sizeof(result_file));
+	strncpy(result_file, output_path, result_file_len);
 
 	FILE* pf = fopen(output_path, "w");
 	if (!pf)
@@ -316,6 +319,9 @@ int row_count_callback(void* data, int argc, char** argv, char** azColName)
 
 void logbook_open()
 {
+	if (db != NULL)
+		return; // already open
+
 	char db_path[PATH_MAX];
 	char* zErrMsg = 0;
 	snprintf(db_path, sizeof(db_path), "%s/sbitx/data/sbitx.db", getenv("HOME"));
@@ -353,6 +359,13 @@ void logbook_open()
 		}
 		printf("Logbook indexes created.\n");
 	}
+}
+
+void logbook_close()
+{
+	if (db)
+		sqlite3_close(db);
+	db = NULL;
 }
 
 void logbook_add(const char* contact_callsign, const char* rst_sent, const char* exchange_sent,
@@ -396,8 +409,7 @@ void logbook_add(const char* contact_callsign, const char* rst_sent, const char*
 				rst_sent, exchange_sent, contact_callsign, rst_recv, exchange_recv, comments);
 	}
 
-	if (db == NULL)
-		logbook_open();
+	logbook_open();
 
 	sqlite3_exec(db, statement, 0, 0, &err_msg);
 
@@ -1080,8 +1092,7 @@ int logbook_fill(int from_id, int count, const char* query)
 	sqlite3_stmt *stmt;
 	char statement[200], param[2000];
 
-	if (db == NULL)
-		logbook_open();
+	logbook_open();
 
 	// add to the bottom of the logbook
 	if (from_id > 0) {
@@ -1317,7 +1328,7 @@ void on_selection_changed(GtkTreeSelection* selection, gpointer user_data)
 	}
 }
 
-void logbook_close(GtkWidget* widget, gpointer user_data)
+static void logbook_window_close(GtkWidget* widget, gpointer user_data)
 {
 	/*
 		At the time this callback occurs, the toplevel is already being destroyed,
@@ -1366,7 +1377,7 @@ void logbook_list_open()
 	GtkWidget* scrolled_window;
 	logbook_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_title(GTK_WINDOW(logbook_window), "Logbook");
-	g_signal_connect(logbook_window, "destroy", G_CALLBACK(logbook_close), NULL);
+	g_signal_connect(logbook_window, "destroy", G_CALLBACK(logbook_window_close), NULL);
 	g_signal_connect(logbook_window, "key-press-event", G_CALLBACK(logbook_key_press), NULL);
 	gtk_container_set_border_width(GTK_CONTAINER(logbook_window), 10);
 	gtk_window_set_default_size(GTK_WINDOW(logbook_window), 780, 400); // Set initial logbook_window size

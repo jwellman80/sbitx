@@ -241,7 +241,7 @@ static void get_logs(struct mg_connection *c, char *args){
 
 	query[0] = 0;
 	row_id = atoi(strtok(args, " "));
-	logbook_query(strtok(NULL, " \t\n"), row_id, logbook_path);
+	logbook_query(strtok(NULL, " \t\n"), row_id, logbook_path, sizeof(logbook_path));
 	FILE *pf = fopen(logbook_path, "r");
 	if (!pf)
 		return;
@@ -1414,7 +1414,6 @@ void webserver_start(){
 	strcpy(s_web_root, directory);
 	strcat(s_web_root, "/web");
 	//printf("Dir %s\n",s_web_root);
-	//logbook_open();
- 	pthread_create( &webserver_thread, NULL, webserver_thread_function, 
+	pthread_create( &webserver_thread, NULL, webserver_thread_function,
 		(void*)NULL);
 }

@@ -1,4 +1,68 @@
-# v5.3 - Currently In Test/Dev
+# v5.4
+**New Features:**
+- sBitx IQ improvements
+	+ enhanced VFO, complex mixing and down-converting
+	+ improved processing of I and Q data in the sBitx receiving pipeline
+	+ AGC function and AM detector changes to work in updated pipeline
+- FM Mode and Squelch
+    + Added FM mode and squelch control for use on 10M and transnverters
+- Text console can scroll back to view and work with up to 500 lines of history, in all modes
+- Added support for Touch Display 2 and larger displays
+	+ Makes it easier to touch and see the buttons on a Touch Display 2 or external display
+	+ New file is read upon sbitx startup called display_settings.ini where you can set the display type or resolution
+	+ `display_type=1` is for the original, older 7 inch touch display
+	+ `display_type=2` is for the newer 7 inch touch display
+	+ `ui_scale` can be changed for use with a larger display
+- Added styles option to customize the sBitx application.
+	+ Text size, font, color, and types are now supported.
+	+ Styles templates are stored in the data folder as tpl files.
+	+ If there is a file named `user_style.tpl` in the sbitx data folder, then it will load it on sbitx startup.
+	+ If the `user_style.tpl` file is not found then it will load `default_style.tpl` if it is present.
+	+ If none of these files are located, then it will load the factory style we are all used to.
+	+ There are sample styles in the data folder that can be loaded. Just have to rename one of them to user_style.tpl
+ - Added mode_bal to hw_settings.ini to balance LSB and CWR to USB and CW. 
+	+ 0.8 is a reasonable value. 
+	+ Also harmonized filter band edges.
+	+ removed old ssb_val 
+- Controlled Envelope Single Sideband (CESSB)
+	+ enable via the button in menu 1 or the '\cessb on' command
+- Added Tune function to FTx modes
+- Added option to use USB audio devices for sound routing (speaker/phones and mic input)
+    + The options are in the Set dialog box in Menu 1
+
+**Changes:**
+- GUI
+	+ Moved Direct Frequency Keypad to a new button called PAD and added quick buttons
+	+ Swapped button placement on main display
+	+ Moved eptt & vfolock to menu 2
+	+ Menu 1 is reserved for mostly audio related controls
+- CW Decoder
+	+ Fixed colors of sent and received text on console, use new lines when doing T/R switch
+	+ Only displays cw stats (WPM, dot/dash ratio) when they are meaningful
+	+ Less garbage ouput when only noise is present
+	+ Replace sliding window in denoise function with EMA filter
+	+ Improved accuracy with better weak signal performance
+	+ Replaced viterbi with simpler classifier
+	+ Simplified code of own TX decode process
+	+ Set BW to `50` when using decoder is recommended
+- Added more controls to the Web interface
+  
+**Fixes:**
+- APF init Bug
+	+ Fixed a bug where APF would not initialize properly
+- Audio Cleanup
+	+ Made a small change to cleanup the static between TX to RX 
+- APM sampling improved for better regularity
+- VSWR initialization when user disabled fixed
+- Fixed scope intensity where it now loads and restores previous setting
+- Fixed Macro loading and F1-F8 buttons when changing modes
+
+# v5.301
+**Bug Fixes:**
+- Fixed blank logbook in web GUI
+- Fixed REC function for wav file generation
+
+# v5.3
 **New Features:**
 - Added tune option for CW mode
 - Consolidated Band, Mode, Bandstack, and other buttons to comboboxes
@@ -49,6 +113,7 @@
   + **FT4** support: same features as FT8, twice as fast (and less robust)
   + More timestamp precision for both FT4 and FT8
   + FTX_CQ ALT_EVEN setting: CQ every 4th slot (listen more)
+  + Distance in KM is now shown in the decoded list
   + FTX_AUTO modes:
     * OFF is fully manual: click messages only to populate logger fields, then use macro buttons
     * ANS auto-answers and finishes QSOs; click a previous incoming message if you need to repond again to it

@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define VER_STR "sbitx v5.3" // Brought to you by the volunteer development Team for sBitx
+#define VER_STR "sbitx v5.4" // Brought to you by the volunteer development Team for sBitx
 
 // maximum sem_count in write_console_semantic()
 #define MAX_CONSOLE_LINE_STYLES 12
@@ -47,6 +47,7 @@ typedef enum {
 	STYLE_TELNET,
 
 	// non-semantic styles, for other fields and UI elements
+	STYLE_HIGHLIGHT,
 	STYLE_FIELD_LABEL,
 	STYLE_FIELD_VALUE,
 	STYLE_LARGE_FIELD,
