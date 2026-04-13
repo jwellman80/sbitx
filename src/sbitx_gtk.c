@@ -3554,9 +3554,9 @@ void draw_spectrum(struct field *f_spectrum, cairo_t *gfx)
 		pitch = f_spectrum->x + (f_spectrum->width / 2) -
 				((f_spectrum->width * pitch) / (span * 1000));
 	}
-	else if (!strcmp(mode_f->value, "AM"))
+	else if (!strcmp(mode_f->value, "AM") || !strcmp(mode_f->value, "FM"))
 	{
-		// For AM mode, cover both sidebands
+		// For AM/FM mode, cover both sidebands symmetrically
 		filter_start = f_spectrum->x + (f_spectrum->width / 2) -
 					   ((f_spectrum->width * bw_high) / (span * 1000));
 		if (filter_start < f_spectrum->x)
@@ -3564,7 +3564,7 @@ void draw_spectrum(struct field *f_spectrum, cairo_t *gfx)
 		filter_width = (f_spectrum->width * (bw_high + bw_low)) / (span * 1000);
 		if (filter_width + filter_start > f_spectrum->x + f_spectrum->width)
 			filter_width = f_spectrum->x + f_spectrum->width - filter_start;
-		pitch = f_spectrum->x + (f_spectrum->width / 2); // Center pitch for AM
+		pitch = f_spectrum->x + (f_spectrum->width / 2); // Center pitch for AM/FM
 	}
 	else
 	{
